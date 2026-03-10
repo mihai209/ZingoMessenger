@@ -1,0 +1,13 @@
+{
+  "name": "zingo-messenger",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "backend:build": "./backend/gradlew -p backend build -x test",
+    "backend:run": "./backend/gradlew -p backend run",
+    "frontend:dev": "./frontend/gradlew -p frontend wasmJsBrowserDevelopmentRun",
+    "frontend:build": "./frontend/gradlew -p frontend wasmJsBrowserProductionWebpack",
+    "dev": "npm run backend:run",
+    "build": "npm run backend:build && npm run frontend:build"
+  }
+}

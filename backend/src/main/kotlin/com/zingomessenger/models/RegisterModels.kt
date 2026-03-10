@@ -26,3 +26,18 @@ data class ErrorResponse(
     val error: String,
     val details: List<String> = emptyList()
 )
+
+@Serializable
+data class LoginRequest(
+    val identifier: String,
+    val password: String
+)
+
+@Serializable
+data class LoginResponse(
+    val id: String,
+    val username: String,
+    val email: String? = null,
+    val phone: String? = null,
+    val birthDate: String
+)

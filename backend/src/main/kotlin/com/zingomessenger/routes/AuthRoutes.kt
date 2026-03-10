@@ -2,6 +2,8 @@ package com.zingomessenger.routes
 
 import com.zingomessenger.db.tables.Users
 import com.zingomessenger.models.ErrorResponse
+import com.zingomessenger.models.LoginRequest
+import com.zingomessenger.models.LoginResponse
 import com.zingomessenger.models.RegisterRequest
 import com.zingomessenger.models.RegisterResponse
 import com.zingomessenger.security.PasswordHasher
@@ -76,6 +78,47 @@ fun Route.authRoutes() {
 
             call.respond(HttpStatusCode.Created, response)
         }
+
+        post("/login") {
+            val req = call.receive<LoginRequest>()
+            val errors = validateLogin(req)
+
+            if (errors.isNotEmpty()) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("validation_error", errors))
+                return@post
+            }
+
+            val identifier = req.identifier.trim()
+
+            val userRow = transaction {
+                Users.select {
+                    (Users.username eq identifier) or
+                        (Users.email eq identifier) or
+                        (Users.phone eq identifier)
+                }.limit(1).singleOrNull()
+            }
+
+            if (userRow == null) {
+                call.respond(HttpStatusCode.Unauthorized, ErrorResponse("invalid_credentials"))
+                return@post
+            }
+
+            val isValid = PasswordHasher.verify(req.password, userRow[Users.passwordHash])
+            if (!isValid) {
+                call.respond(HttpStatusCode.Unauthorized, ErrorResponse("invalid_credentials"))
+                return@post
+            }
+
+            val response = LoginResponse(
+                id = userRow[Users.id].value.toString(),
+                username = userRow[Users.username],
+                email = userRow[Users.email],
+                phone = userRow[Users.phone],
+                birthDate = userRow[Users.birthDate].toString()
+            )
+
+            call.respond(HttpStatusCode.OK, response)
+        }
     }
 }
 
@@ -103,6 +146,19 @@ private fun validateRegister(req: RegisterRequest): List<String> {
         LocalDate.parse(req.birthDate)
     } catch (_: Exception) {
         errors.add("birthDate must be ISO format yyyy-MM-dd")
+    }
+
+    return errors
+}
+
+private fun validateLogin(req: LoginRequest): List<String> {
+    val errors = mutableListOf<String>()
+
+    if (req.identifier.trim().isEmpty()) {
+        errors.add("identifier is required")
+    }
+    if (req.password.isBlank()) {
+        errors.add("password is required")
     }
 
     return errors
