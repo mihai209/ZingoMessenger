@@ -7,3 +7,4 @@ backend/build
 .env
 jurnal.md
 .gradle
+.kotlin
