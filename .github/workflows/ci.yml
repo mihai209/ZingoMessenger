@@ -44,14 +44,21 @@ jobs:
       - name: Package frontend artifact
         run: |
           set -e
-          DIST_DIR="frontend/build/dist/wasmJs/productionExecutable"
-          if [ ! -d "$DIST_DIR" ]; then
-            echo "Expected dist not found: $DIST_DIR"
+          DIST_BUNDLE="frontend/build/kotlin-webpack/wasmJs/productionExecutable"
+          INDEX_HTML="frontend/build/processedResources/wasmJs/main/index.html"
+          if [ ! -d "$DIST_BUNDLE" ]; then
+            echo "Expected bundle not found: $DIST_BUNDLE"
+            find frontend/build -maxdepth 6 -type f
+            exit 1
+          fi
+          if [ ! -f "$INDEX_HTML" ]; then
+            echo "Expected index not found: $INDEX_HTML"
             find frontend/build -maxdepth 6 -type f
             exit 1
           fi
           mkdir -p frontend-artifact
-          cp -r "$DIST_DIR"/* frontend-artifact/
+          cp "$INDEX_HTML" frontend-artifact/index.html
+          cp -r "$DIST_BUNDLE"/* frontend-artifact/
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4

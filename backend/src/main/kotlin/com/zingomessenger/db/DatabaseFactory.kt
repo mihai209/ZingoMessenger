@@ -7,6 +7,7 @@ import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.io.File
 
 object DatabaseFactory {
     fun init() {
@@ -19,6 +20,16 @@ object DatabaseFactory {
     }
 
     private fun hikari(): HikariDataSource {
+        val dbType = (Env.get("DB_TYPE", "sqlite") ?: "sqlite").lowercase()
+
+        return if (dbType == "sqlite") {
+            sqliteDataSource()
+        } else {
+            mysqlDataSource()
+        }
+    }
+
+    private fun mysqlDataSource(): HikariDataSource {
         val host = Env.get("DB_HOST", "127.0.0.1")!!
         val port = Env.get("DB_PORT", "3306")!!
         val dbName = Env.get("DB_NAME", "zingo")!!
@@ -40,5 +51,35 @@ object DatabaseFactory {
         }
 
         return HikariDataSource(config)
+    }
+
+    private fun sqliteDataSource(): HikariDataSource {
+        val sqlitePath = Env.get("DB_SQLITE_PATH", "./data/zingo.db")!!
+        val jdbcUrl = Env.get("DB_URL") ?: "jdbc:sqlite:$sqlitePath"
+
+        ensureSqliteDir(jdbcUrl)
+
+        val config = HikariConfig().apply {
+            setJdbcUrl(jdbcUrl)
+            driverClassName = "org.sqlite.JDBC"
+            maximumPoolSize = 1
+            isAutoCommit = false
+            transactionIsolation = "TRANSACTION_SERIALIZABLE"
+            validate()
+        }
+
+        return HikariDataSource(config)
+    }
+
+    private fun ensureSqliteDir(jdbcUrl: String) {
+        val prefix = "jdbc:sqlite:"
+        if (!jdbcUrl.startsWith(prefix)) return
+        val rawPath = jdbcUrl.removePrefix(prefix)
+        if (rawPath == ":memory:" || rawPath.isBlank()) return
+        val file = File(rawPath)
+        val parent = file.parentFile ?: return
+        if (!parent.exists()) {
+            parent.mkdirs()
+        }
     }
 }

@@ -16,6 +16,7 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.UUID
 
 fun Route.authRoutes() {
     route("/auth") {
@@ -47,7 +48,9 @@ fun Route.authRoutes() {
                     return@transaction Pair(null, conflicts)
                 }
 
-                val id = Users.insertAndGetId {
+                val id = UUID.randomUUID().toString()
+                Users.insert {
+                    it[Users.id] = id
                     it[Users.username] = req.username
                     it[Users.email] = req.email?.trim()?.ifBlank { null }
                     it[Users.phone] = req.phone?.trim()?.ifBlank { null }
@@ -55,7 +58,6 @@ fun Route.authRoutes() {
                     it[Users.birthDate] = birthDate
                     it[Users.createdAt] = LocalDateTime.now()
                 }
-
 
                 return@transaction Pair(id, emptyList<String>())
             }
@@ -69,7 +71,7 @@ fun Route.authRoutes() {
             }
 
             val response = RegisterResponse(
-                id = userId.toString(),
+                id = userId,
                 username = req.username,
                 email = req.email?.trim()?.ifBlank { null },
                 phone = req.phone?.trim()?.ifBlank { null },
@@ -110,7 +112,7 @@ fun Route.authRoutes() {
             }
 
             val response = LoginResponse(
-                id = userRow[Users.id].value.toString(),
+                id = userRow[Users.id],
                 username = userRow[Users.username],
                 email = userRow[Users.email],
                 phone = userRow[Users.phone],

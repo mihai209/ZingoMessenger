@@ -34,6 +34,7 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-java-time:$exposedVersion")
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("com.mysql:mysql-connector-j:8.4.0")
+    implementation("org.xerial:sqlite-jdbc:3.45.2.0")
     implementation("io.github.cdimascio:dotenv-kotlin:6.4.1")
 
     implementation("org.mindrot:jbcrypt:0.4")
