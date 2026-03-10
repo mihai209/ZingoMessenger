@@ -36,18 +36,25 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backend-jar
-          path: backend/build/libs/*.jar
+          path: backend/build/libs/*-all.jar
 
       - name: Build frontend (web)
         run: ./frontend/gradlew -p frontend wasmJsBrowserProductionWebpack
 
-      - name: List frontend dist
+      - name: Package frontend artifact
         run: |
-          ls -la frontend/build || true
-          find frontend/build -maxdepth 6 -type f || true
+          set -e
+          DIST_DIR="frontend/build/dist/wasmJs/productionExecutable"
+          if [ ! -d "$DIST_DIR" ]; then
+            echo "Expected dist not found: $DIST_DIR"
+            find frontend/build -maxdepth 6 -type f
+            exit 1
+          fi
+          mkdir -p frontend-artifact
+          cp -r "$DIST_DIR"/* frontend-artifact/
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
         with:
           name: frontend-web
-          path: frontend/build/
+          path: frontend-artifact/

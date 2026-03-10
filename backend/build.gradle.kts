@@ -4,6 +4,7 @@ plugins {
     kotlin("jvm") version "1.9.24"
     kotlin("plugin.serialization") version "1.9.24"
     application
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 group = "com.zingomessenger"
@@ -48,4 +49,15 @@ java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(17))
     }
+}
+
+tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
+    archiveClassifier.set("all")
+    manifest {
+        attributes["Main-Class"] = "io.ktor.server.netty.EngineMain"
+    }
+}
+
+tasks.named("build") {
+    dependsOn("shadowJar")
 }
