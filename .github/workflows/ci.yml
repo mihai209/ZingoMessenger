@@ -35,8 +35,11 @@ jobs:
       - name: Build frontend (web)
         run: ./frontend/gradlew -p frontend wasmJsBrowserProductionWebpack
 
+      - name: List frontend dist
+        run: ls -la frontend/build/dist && find frontend/build/dist -maxdepth 4 -type f
+
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
         with:
           name: frontend-web
-          path: frontend/build/dist/wasmJs/productionExecutable/
+          path: frontend/build/dist/
