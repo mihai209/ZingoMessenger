@@ -39,7 +39,7 @@ val generateEnv = tasks.register("generateEnv") {
             package com.zingomessenger.web
 
             object EnvConfig {
-                const val API_BASE = \"$safeApiBase\"
+                const val API_BASE = "$safeApiBase"
             }
             """.trimIndent()
         )
