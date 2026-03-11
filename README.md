@@ -1,2 +1,23 @@
 # ZingoMessenger
-The private chat platform can be used locally, late call nights with friends or just talk to your family anytime anywhere all encrypted no restrictions or age verification systems E2E, while this project is under MIT License and open-source to modify it.
+
+Stack curent:
+- Backend: Node.js (Express) + SQLite/MySQL
+- Frontend: Next.js (React)
+
+## Quick start
+
+Backend:
+```bash
+cd backend
+yarn install
+yarn dev
+```
+
+Frontend:
+```bash
+cd frontend
+yarn install
+yarn dev
+```
+
+Open `http://localhost:3000`.

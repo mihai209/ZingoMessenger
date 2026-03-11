@@ -1,11 +1,22 @@
-backend/.env
-frontend/.env
-frontend/build
-frontend/.gradle
-backend/.gradle
-backend/build
+# Env
 .env
+backend/.env
+frontend/.env.local
+
+# Node
+node_modules
+backend/node_modules
+frontend/node_modules
+
+# Backend data
+backend/data
+
+# Next.js
+frontend/.next
+frontend/out
+
+# Misc
+frontend-web
 jurnal.md
 .gradle
 .kotlin
-frontend-web

@@ -1,7 +1,0 @@
-export JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
-export PATH=$JAVA_HOME/bin:$PATH
-
-cd /home/mihai/Desktop/ZingoMessenger/backend
-./gradlew --refresh-dependencies build -x test
-./gradlew -Dorg.gradle.java.home=/usr/lib/jvm/temurin-17-jdk-amd64 build -x test
-./gradlew run -Dorg.gradle.java.home=/usr/lib/jvm/temurin-17-jdk-amd64

@@ -3,11 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "backend:build": "./backend/gradlew -p backend build -x test",
-    "backend:run": "./backend/gradlew -p backend run",
-    "frontend:dev": "./frontend/gradlew -p frontend wasmJsBrowserDevelopmentRun",
-    "frontend:build": "./frontend/gradlew -p frontend wasmJsBrowserProductionWebpack",
-    "dev": "npm run backend:run",
-    "build": "npm run backend:build && npm run frontend:build"
+    "backend:dev": "yarn --cwd backend dev",
+    "backend:start": "yarn --cwd backend start",
+    "frontend:dev": "yarn --cwd frontend dev",
+    "frontend:build": "yarn --cwd frontend build",
+    "frontend:start": "yarn --cwd frontend start",
+    "dev": "yarn backend:dev",
+    "build": "yarn frontend:build"
   }
 }
