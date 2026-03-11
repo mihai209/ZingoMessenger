@@ -90,6 +90,54 @@ async function initSchema() {
       table.index(["status"]);
     });
   }
+
+  const chatsExists = await db.schema.hasTable("chats");
+  if (!chatsExists) {
+    await db.schema.createTable("chats", (table) => {
+      table.string("id", 36).primary();
+      table.dateTime("created_at").notNullable();
+    });
+  }
+
+  const membersExists = await db.schema.hasTable("chat_members");
+  if (!membersExists) {
+    await db.schema.createTable("chat_members", (table) => {
+      table.string("chat_id", 36).notNullable();
+      table.string("user_id", 36).notNullable();
+      table.primary(["chat_id", "user_id"]);
+      table.index(["user_id"]);
+    });
+  }
+
+  const messagesExists = await db.schema.hasTable("messages");
+  if (!messagesExists) {
+    await db.schema.createTable("messages", (table) => {
+      table.string("id", 36).primary();
+      table.string("chat_id", 36).notNullable();
+      table.string("sender_id", 36).notNullable();
+      table.string("recipient_id", 36).notNullable();
+      table.text("body").notNullable();
+      table.dateTime("created_at").notNullable();
+      table.dateTime("read_at");
+      table.dateTime("edited_at");
+      table.dateTime("deleted_at");
+      table.index(["chat_id"]);
+      table.index(["recipient_id"]);
+    });
+  } else {
+    const hasEdited = await db.schema.hasColumn("messages", "edited_at");
+    if (!hasEdited) {
+      await db.schema.alterTable("messages", (table) => {
+        table.dateTime("edited_at");
+      });
+    }
+    const hasDeleted = await db.schema.hasColumn("messages", "deleted_at");
+    if (!hasDeleted) {
+      await db.schema.alterTable("messages", (table) => {
+        table.dateTime("deleted_at");
+      });
+    }
+  }
 }
 
 module.exports = { db, initSchema };

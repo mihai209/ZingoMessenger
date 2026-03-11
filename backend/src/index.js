@@ -19,7 +19,7 @@ const corsOptions = {
     if (allowedOrigins.includes("*") || allowedOrigins.includes(origin)) return cb(null, true);
     return cb(new Error("Not allowed by CORS"));
   },
-  methods: ["GET", "POST", "OPTIONS"],
+  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
 };
@@ -133,6 +133,50 @@ async function requireAuth(req, res, next) {
   }
   req.user = user;
   req.session = session;
+  return next();
+}
+
+async function areFriends(userId, otherId) {
+  const row = await db("friend_requests")
+    .where({ status: "accepted" })
+    .andWhere((qb) => {
+      qb.where({ from_user_id: userId, to_user_id: otherId }).orWhere({
+        from_user_id: otherId,
+        to_user_id: userId
+      });
+    })
+    .first();
+  return Boolean(row);
+}
+
+async function ensureChat(userId, otherId) {
+  const row = await db("chat_members")
+    .select("chat_id")
+    .whereIn("user_id", [userId, otherId])
+    .groupBy("chat_id")
+    .havingRaw("count(distinct user_id) = 2")
+    .first();
+
+  if (row?.chat_id) return row.chat_id;
+
+  const chatId = uuidv4();
+  const now = new Date().toISOString();
+  await db("chats").insert({ id: chatId, created_at: now });
+  await db("chat_members").insert([
+    { chat_id: chatId, user_id: userId },
+    { chat_id: chatId, user_id: otherId }
+  ]);
+  return chatId;
+}
+
+async function requireChatMember(req, res, next) {
+  const chatId = req.params.chatId;
+  const member = await db("chat_members")
+    .where({ chat_id: chatId, user_id: req.user.id })
+    .first();
+  if (!member) {
+    return res.status(403).json({ error: "forbidden" });
+  }
   return next();
 }
 
@@ -434,12 +478,21 @@ app.post("/friends/respond", requireAuth, async (req, res) => {
   });
 
   if (action === "accept") {
+    const requester = await db("users").where({ id: request.from_user_id }).first();
     sendEvent(request.from_user_id, "friend_added", {
       id: req.user.id,
       username: req.user.username,
       avatarUrl: req.user.avatar_url || null,
       status: req.user.status || "online"
     });
+    if (requester) {
+      sendEvent(req.user.id, "friend_added", {
+        id: requester.id,
+        username: requester.username,
+        avatarUrl: requester.avatar_url || null,
+        status: requester.status || "online"
+      });
+    }
   }
 
   return res.json({ ok: true, status: action });
@@ -501,6 +554,14 @@ app.get("/friends/list", requireAuth, async (req, res) => {
   const users = friendIds.length ? await db("users").whereIn("id", friendIds) : [];
   const userMap = new Map(users.map((u) => [u.id, u]));
 
+  const unreadRows = await db("messages")
+    .select("sender_id")
+    .count({ count: "id" })
+    .where({ recipient_id: req.user.id })
+    .whereNull("read_at")
+    .groupBy("sender_id");
+  const unreadMap = new Map(unreadRows.map((r) => [r.sender_id, Number(r.count)]));
+
   const items = accepted.map((r) => {
     const friendId = r.from_user_id === req.user.id ? r.to_user_id : r.from_user_id;
     const u = userMap.get(friendId);
@@ -508,7 +569,8 @@ app.get("/friends/list", requireAuth, async (req, res) => {
       id: friendId,
       username: u?.username || "unknown",
       avatarUrl: u?.avatar_url || null,
-      status: u?.status || "offline"
+      status: u?.status || "offline",
+      unreadCount: unreadMap.get(friendId) || 0
     };
   });
 
@@ -537,6 +599,205 @@ app.post("/friends/remove", requireAuth, async (req, res) => {
 
   await db("friend_requests").where({ id: request.id }).update({ status: "removed" });
   sendEvent(friendId, "friend_removed", { id: req.user.id });
+  sendEvent(req.user.id, "friend_removed", { id: friendId });
+  return res.json({ ok: true });
+});
+
+app.post("/chats/ensure", requireAuth, async (req, res) => {
+  const { username } = req.body || {};
+  if (!username || typeof username !== "string") {
+    return res.status(400).json({ error: "validation_error" });
+  }
+  const target = await db("users").where({ username: username.trim() }).first();
+  if (!target) {
+    return res.status(404).json({ error: "user_not_found" });
+  }
+  const ok = await areFriends(req.user.id, target.id);
+  if (!ok) {
+    return res.status(403).json({ error: "not_friends" });
+  }
+
+  const chatId = await ensureChat(req.user.id, target.id);
+  return res.json({
+    chatId,
+    user: {
+      id: target.id,
+      username: target.username,
+      avatarUrl: target.avatar_url || null,
+      status: target.status || "offline"
+    }
+  });
+});
+
+app.get("/chats/:chatId/messages", requireAuth, requireChatMember, async (req, res) => {
+  const chatId = req.params.chatId;
+  const members = await db("chat_members").where({ chat_id: chatId });
+  const other = members.find((m) => m.user_id !== req.user.id);
+  if (!other) {
+    return res.status(400).json({ error: "invalid_chat" });
+  }
+  const friendsOk = await areFriends(req.user.id, other.user_id);
+  const rows = await db("messages").where({ chat_id: chatId }).orderBy("created_at", "asc");
+  await db("messages")
+    .where({ chat_id: chatId, recipient_id: req.user.id })
+    .whereNull("read_at")
+    .update({ read_at: new Date().toISOString() });
+
+  const items = rows.map((m) => ({
+    id: m.id,
+    fromId: m.sender_id,
+    body: m.body,
+    createdAt: m.created_at,
+    editedAt: m.edited_at || null,
+    deletedAt: m.deleted_at || null
+  }));
+  return res.json({ items, canChat: friendsOk });
+});
+
+app.post("/chats/:chatId/messages", requireAuth, requireChatMember, async (req, res) => {
+  const chatId = req.params.chatId;
+  const { body } = req.body || {};
+  if (!body || typeof body !== "string" || body.trim().length === 0) {
+    return res.status(400).json({ error: "validation_error" });
+  }
+
+  const members = await db("chat_members").where({ chat_id: chatId });
+  const other = members.find((m) => m.user_id !== req.user.id);
+  if (!other) {
+    return res.status(400).json({ error: "invalid_chat" });
+  }
+
+  const friendsOk = await areFriends(req.user.id, other.user_id);
+  if (!friendsOk) {
+    return res.status(403).json({ error: "chat_locked" });
+  }
+
+  const id = uuidv4();
+  const createdAt = new Date().toISOString();
+  await db("messages").insert({
+    id,
+    chat_id: chatId,
+    sender_id: req.user.id,
+    recipient_id: other.user_id,
+    body: body.trim(),
+    created_at: createdAt
+  });
+
+  const recipient = await db("users").where({ id: other.user_id }).first();
+  if (recipient && ["online", "sleepy"].includes(recipient.status || "offline")) {
+    sendEvent(recipient.id, "message", {
+      chatId,
+      id,
+      from: {
+        id: req.user.id,
+        username: req.user.username,
+        avatarUrl: req.user.avatar_url || null
+      },
+      body: body.trim(),
+      createdAt
+    });
+  }
+
+  return res.json({ ok: true, id, createdAt });
+});
+
+app.patch("/chats/:chatId/messages/:messageId", requireAuth, requireChatMember, async (req, res) => {
+  const chatId = req.params.chatId;
+  const messageId = req.params.messageId;
+  const { body } = req.body || {};
+  if (!body || typeof body !== "string" || body.trim().length === 0) {
+    return res.status(400).json({ error: "validation_error" });
+  }
+
+  const message = await db("messages").where({ id: messageId, chat_id: chatId }).first();
+  if (!message) {
+    return res.status(404).json({ error: "not_found" });
+  }
+  if (message.sender_id !== req.user.id) {
+    return res.status(403).json({ error: "not_allowed" });
+  }
+  if (message.deleted_at) {
+    return res.status(409).json({ error: "already_deleted" });
+  }
+
+  const editedAt = new Date().toISOString();
+  await db("messages")
+    .where({ id: messageId })
+    .update({ body: body.trim(), edited_at: editedAt });
+
+  const members = await db("chat_members").where({ chat_id: chatId });
+  const other = members.find((m) => m.user_id !== req.user.id);
+  if (other) {
+    sendEvent(other.user_id, "message_edit", {
+      chatId,
+      messageId,
+      body: body.trim(),
+      editedAt,
+      fromId: req.user.id
+    });
+  }
+  sendEvent(req.user.id, "message_edit", {
+    chatId,
+    messageId,
+    body: body.trim(),
+    editedAt,
+    fromId: req.user.id
+  });
+
+  return res.json({ ok: true, messageId, editedAt });
+});
+
+app.delete(
+  "/chats/:chatId/messages/:messageId",
+  requireAuth,
+  requireChatMember,
+  async (req, res) => {
+    const chatId = req.params.chatId;
+    const messageId = req.params.messageId;
+
+    const message = await db("messages").where({ id: messageId, chat_id: chatId }).first();
+    if (!message) {
+      return res.status(404).json({ error: "not_found" });
+    }
+    if (message.sender_id !== req.user.id) {
+      return res.status(403).json({ error: "not_allowed" });
+    }
+    if (message.deleted_at) {
+      return res.json({ ok: true, messageId, deletedAt: message.deleted_at });
+    }
+
+    const deletedAt = new Date().toISOString();
+    await db("messages")
+      .where({ id: messageId })
+      .update({ body: "", deleted_at: deletedAt });
+
+    const members = await db("chat_members").where({ chat_id: chatId });
+    const other = members.find((m) => m.user_id !== req.user.id);
+    if (other) {
+      sendEvent(other.user_id, "message_delete", {
+        chatId,
+        messageId,
+        deletedAt,
+        fromId: req.user.id
+      });
+    }
+    sendEvent(req.user.id, "message_delete", {
+      chatId,
+      messageId,
+      deletedAt,
+      fromId: req.user.id
+    });
+
+    return res.json({ ok: true, messageId, deletedAt });
+  }
+);
+
+app.post("/chats/:chatId/read", requireAuth, requireChatMember, async (req, res) => {
+  const chatId = req.params.chatId;
+  await db("messages")
+    .where({ chat_id: chatId, recipient_id: req.user.id })
+    .whereNull("read_at")
+    .update({ read_at: new Date().toISOString() });
   return res.json({ ok: true });
 });
 

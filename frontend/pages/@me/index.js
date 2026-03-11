@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import {
@@ -8,6 +8,7 @@ import {
   Container,
   Divider,
   IconButton,
+  Menu,
   MenuItem,
   Paper,
   Tab,
@@ -22,6 +23,7 @@ import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 
 export default function MePage() {
+  const [userId, setUserId] = useState("");
   const [username, setUsername] = useState("User");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [status, setStatus] = useState("online");
@@ -30,6 +32,15 @@ export default function MePage() {
   const [friends, setFriends] = useState([]);
   const [addStatus, setAddStatus] = useState("");
   const [panel, setPanel] = useState("add");
+  const [activeChat, setActiveChat] = useState(null);
+  const [canChat, setCanChat] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [messageInput, setMessageInput] = useState("");
+  const [contextMenu, setContextMenu] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editingValue, setEditingValue] = useState("");
+  const messagesEndRef = useRef(null);
+  const activeChatRef = useRef(null);
   const router = useRouter();
   const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
 
@@ -44,6 +55,9 @@ export default function MePage() {
           return;
         }
         const data = await res.json();
+        if (isMounted && data?.id) {
+          setUserId(data.id);
+        }
         if (isMounted && data?.username) {
           setUsername(data.username);
         }
@@ -99,6 +113,10 @@ export default function MePage() {
               if (prev.find((f) => f.id === payload.id)) return prev;
               return [payload, ...prev];
             });
+            const currentChat = activeChatRef.current;
+            if (currentChat && currentChat.userId === payload.id) {
+              setCanChat(true);
+            }
           } catch (_err) {
             // ignore
           }
@@ -113,10 +131,79 @@ export default function MePage() {
             // ignore
           }
         });
+        es.addEventListener("message", (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            const currentChat = activeChatRef.current;
+            if (currentChat && payload.chatId === currentChat.chatId) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: payload.id || payload.createdAt,
+                  fromId: payload.from.id,
+                  body: payload.body,
+                  createdAt: payload.createdAt,
+                  editedAt: null,
+                  deletedAt: null
+                }
+              ]);
+              fetch(`${apiBase}/chats/${currentChat.chatId}/read`, {
+                method: "POST",
+                credentials: "include"
+              });
+              return;
+            }
+            setFriends((prev) =>
+              prev.map((f) =>
+                f.id === payload.from.id
+                  ? { ...f, unreadCount: (f.unreadCount || 0) + 1 }
+                  : f
+              )
+            );
+          } catch (_err) {
+            // ignore
+          }
+        });
+        es.addEventListener("message_edit", (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            const currentChat = activeChatRef.current;
+            if (!currentChat || payload.chatId !== currentChat.chatId) return;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === payload.messageId
+                  ? { ...m, body: payload.body, editedAt: payload.editedAt }
+                  : m
+              )
+            );
+          } catch (_err) {
+            // ignore
+          }
+        });
+        es.addEventListener("message_delete", (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            const currentChat = activeChatRef.current;
+            if (!currentChat || payload.chatId !== currentChat.chatId) return;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === payload.messageId
+                  ? { ...m, body: "", deletedAt: payload.deletedAt }
+                  : m
+              )
+            );
+          } catch (_err) {
+            // ignore
+          }
+        });
         es.addEventListener("friend_removed", (event) => {
           try {
             const payload = JSON.parse(event.data);
             setFriends((prev) => prev.filter((f) => f.id !== payload.id));
+            const currentChat = activeChatRef.current;
+            if (currentChat && currentChat.userId === payload.id) {
+              setCanChat(false);
+            }
           } catch (_err) {
             // ignore
           }
@@ -243,10 +330,132 @@ export default function MePage() {
       credentials: "include"
     });
     setFriends((prev) => prev.filter((f) => f.id !== id));
+    if (activeChatRef.current && activeChatRef.current.userId === id) {
+      setCanChat(false);
+    }
   }
 
+  async function openChat(friend) {
+    const res = await fetch(`${apiBase}/chats/ensure`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: friend.username }),
+      credentials: "include"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.chatId) return;
+
+    setActiveChat({ chatId: data.chatId, username: friend.username, userId: friend.id });
+    activeChatRef.current = { chatId: data.chatId, username: friend.username, userId: friend.id };
+    const msgsRes = await fetch(`${apiBase}/chats/${data.chatId}/messages`, {
+      credentials: "include"
+    });
+    const msgs = await msgsRes.json().catch(() => ({ items: [] }));
+    setMessages(msgs.items || []);
+    setCanChat(Boolean(msgs.canChat));
+    await fetch(`${apiBase}/chats/${data.chatId}/read`, {
+      method: "POST",
+      credentials: "include"
+    });
+    setFriends((prev) =>
+      prev.map((f) => (f.id === friend.id ? { ...f, unreadCount: 0 } : f))
+    );
+  }
+
+  function openContextMenu(e, message) {
+    if (message.fromId !== userId || message.deletedAt) return;
+    e.preventDefault();
+    setContextMenu({
+      mouseX: e.clientX - 2,
+      mouseY: e.clientY - 4,
+      message
+    });
+  }
+
+  function closeContextMenu() {
+    setContextMenu(null);
+  }
+
+  async function handleEditSave() {
+    if (!activeChat || !editingId || !editingValue.trim()) return;
+    const body = editingValue.trim();
+    const res = await fetch(
+      `${apiBase}/chats/${activeChat.chatId}/messages/${editingId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+        credentials: "include"
+      }
+    );
+    if (!res.ok) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === editingId ? { ...m, body, editedAt: new Date().toISOString() } : m
+      )
+    );
+    setEditingId(null);
+    setEditingValue("");
+  }
+
+  function handleEditCancel() {
+    setEditingId(null);
+    setEditingValue("");
+  }
+
+  async function handleDeleteMessage(messageId) {
+    if (!activeChat) return;
+    await fetch(`${apiBase}/chats/${activeChat.chatId}/messages/${messageId}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId ? { ...m, body: "", deletedAt: new Date().toISOString() } : m
+      )
+    );
+  }
+
+  async function sendMessage(e) {
+    e.preventDefault();
+    if (!activeChat || !canChat || !messageInput.trim()) return;
+    const body = messageInput.trim();
+    setMessageInput("");
+
+    const res = await fetch(`${apiBase}/chats/${activeChat.chatId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+      credentials: "include"
+    });
+    if (res.status === 403) {
+      setCanChat(false);
+      return;
+    }
+    if (!res.ok) return;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}`,
+        fromId: userId || "me",
+        body,
+        createdAt: new Date().toISOString(),
+        editedAt: null,
+        deletedAt: null
+      }
+    ]);
+  }
+
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
+
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
+    <>
+      <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <Box
         component="nav"
         sx={{
@@ -532,6 +741,12 @@ export default function MePage() {
                   <Typography variant="body2" sx={{ flex: 1 }}>
                     {friend.username}
                   </Typography>
+                  {friend.unreadCount > 0 && (
+                    <Badge color="error" badgeContent={friend.unreadCount} sx={{ mr: 1 }} />
+                  )}
+                  <Button size="small" onClick={() => openChat(friend)}>
+                    Chat
+                  </Button>
                   <Button size="small" onClick={() => handleRemoveFriend(friend.id)}>
                     Remove
                   </Button>
@@ -541,15 +756,142 @@ export default function MePage() {
           </Paper>
 
           <Paper sx={{ p: { xs: 3, sm: 4 } }} elevation={8}>
-            <Typography variant="h4" gutterBottom>
-              @me
-            </Typography>
-            <Typography variant="body2" sx={{ opacity: 0.7 }}>
-              Logged in. More coming next.
-            </Typography>
+            <Stack spacing={2}>
+              <Typography variant="h5">
+                {activeChat ? `Chat with ${activeChat.username}` : "Select a friend to chat"}
+              </Typography>
+              {activeChat && !canChat && (
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    bgcolor: "rgba(255,93,93,0.2)",
+                    border: "1px solid rgba(255,93,93,0.7)"
+                  }}
+                >
+                  <Typography variant="body1" sx={{ fontWeight: 700 }}>
+                    Sorry you cant continue this chat you are on spectator mode, until this user
+                    added you back in his friends list.
+                  </Typography>
+                </Box>
+              )}
+              <Box
+                sx={{
+                  height: { xs: 320, md: 420 },
+                  overflowY: "auto",
+                  p: 2,
+                  borderRadius: 2,
+                  bgcolor: "rgba(255,255,255,0.04)"
+                }}
+              >
+                {messages.length === 0 && (
+                  <Typography variant="body2" sx={{ opacity: 0.6 }}>
+                    No messages yet.
+                  </Typography>
+                )}
+                <Stack spacing={1.5}>
+                  {messages.map((m) => {
+                    const isMine = m.fromId === userId || m.fromId === "me";
+                    const isDeleted = Boolean(m.deletedAt);
+                    const isEditing = editingId === m.id;
+                    return (
+                      <Box
+                        key={m.id}
+                        onContextMenu={(e) => openContextMenu(e, m)}
+                        sx={{
+                          alignSelf: isMine ? "flex-end" : "flex-start",
+                          bgcolor: isMine ? "primary.main" : "rgba(255,255,255,0.08)",
+                          color: isMine ? "#0b0d12" : "inherit",
+                          px: 2,
+                          py: 1,
+                          borderRadius: 2,
+                          maxWidth: "80%",
+                          cursor: isMine && !isDeleted ? "context-menu" : "default"
+                        }}
+                      >
+                        {isDeleted ? (
+                          <Typography variant="body2" sx={{ fontStyle: "italic", opacity: 0.8 }}>
+                            Message deleted
+                          </Typography>
+                        ) : isEditing ? (
+                          <Stack spacing={1}>
+                            <TextField
+                              size="small"
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                            />
+                            <Stack direction="row" spacing={1} justifyContent="flex-end">
+                              <Button size="small" onClick={handleEditCancel}>
+                                Cancel
+                              </Button>
+                              <Button size="small" variant="contained" onClick={handleEditSave}>
+                                Save
+                              </Button>
+                            </Stack>
+                          </Stack>
+                        ) : (
+                          <>
+                            <Typography variant="body2">{m.body}</Typography>
+                            {m.editedAt && (
+                              <Typography variant="caption" sx={{ opacity: 0.7, mt: 0.5 }}>
+                                edited
+                              </Typography>
+                            )}
+                          </>
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Stack>
+                <div ref={messagesEndRef} />
+              </Box>
+              <Box component="form" onSubmit={sendMessage} sx={{ display: "flex", gap: 2 }}>
+                <TextField
+                  fullWidth
+                  placeholder="Type a message..."
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
+                  disabled={!activeChat || !canChat}
+                />
+                <Button type="submit" variant="contained" disabled={!activeChat || !canChat}>
+                  Send
+                </Button>
+              </Box>
+            </Stack>
           </Paper>
         </Box>
       </Container>
-    </Box>
+      </Box>
+      <Menu
+        open={Boolean(contextMenu)}
+        onClose={closeContextMenu}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          contextMenu !== null
+            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+            : undefined
+        }
+      >
+        <MenuItem
+          onClick={() => {
+            if (!contextMenu?.message) return;
+            setEditingId(contextMenu.message.id);
+            setEditingValue(contextMenu.message.body || "");
+            closeContextMenu();
+          }}
+        >
+          Edit message
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            if (!contextMenu?.message) return;
+            handleDeleteMessage(contextMenu.message.id);
+            closeContextMenu();
+          }}
+        >
+          Delete message
+        </MenuItem>
+      </Menu>
+    </>
   );
 }
