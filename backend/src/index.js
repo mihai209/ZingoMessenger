@@ -7,8 +7,19 @@ const { v4: uuidv4 } = require("uuid");
 const { db, initSchema } = require("./db");
 
 const app = express();
-app.use(cors());
+const corsOptions = {
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+};
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json());
+
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -112,6 +123,10 @@ app.post("/auth/login", async (req, res) => {
 
 async function start() {
   try {
+    console.log("Backend booting...");
+    console.log(`DB_TYPE=${process.env.DB_TYPE || "sqlite"}`);
+    console.log(`DB_SQLITE_PATH=${process.env.DB_SQLITE_PATH || "./data/zingo.db"}`);
+    console.log(`PORT=${process.env.PORT || 8080}`);
     await initSchema();
     const port = Number(process.env.PORT || 8080);
     app.listen(port, () => {
