@@ -46,6 +46,15 @@ export default function LoginPage() {
         setStatus(data?.error || "Login failed");
         return;
       }
+      localStorage.setItem(
+        "zingo_user",
+        JSON.stringify({
+          id: data.id,
+          username: data.username,
+          email: data.email,
+          phone: data.phone
+        })
+      );
       setStatus(`Signed in: ${data.username}`);
       formEl.reset();
       router.push("/@me");
