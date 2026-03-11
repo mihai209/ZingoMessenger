@@ -46,6 +46,27 @@ async function initSchema() {
       table.string("password_hash", 100).notNullable();
       table.date("birth_date").notNullable();
       table.dateTime("created_at").notNullable();
+      table.string("avatar_url", 512);
+    });
+  } else {
+    const hasAvatar = await db.schema.hasColumn("users", "avatar_url");
+    if (!hasAvatar) {
+      await db.schema.alterTable("users", (table) => {
+        table.string("avatar_url", 512);
+      });
+    }
+  }
+
+  const sessionsExists = await db.schema.hasTable("sessions");
+  if (!sessionsExists) {
+    await db.schema.createTable("sessions", (table) => {
+      table.string("id", 36).primary();
+      table.string("user_id", 36).notNullable();
+      table.dateTime("expires_at").notNullable();
+      table.dateTime("created_at").notNullable();
+      table.dateTime("last_seen_at").notNullable();
+      table.index(["user_id"]);
+      table.index(["expires_at"]);
     });
   }
 }

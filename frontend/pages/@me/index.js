@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/router";
+import Link from "next/link";
 import {
   Avatar,
   Box,
@@ -13,19 +15,47 @@ import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 
 export default function MePage() {
   const [username, setUsername] = useState("User");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const router = useRouter();
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("zingo_user");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed?.username) {
-        setUsername(parsed.username);
+    let isMounted = true;
+    async function loadMe() {
+      try {
+        const res = await fetch(`${apiBase}/auth/me`, { credentials: "include" });
+        if (res.status === 401) {
+          router.replace("/login");
+          return;
+        }
+        const data = await res.json();
+        if (isMounted && data?.username) {
+          setUsername(data.username);
+        }
+        if (isMounted && data?.avatarUrl) {
+          setAvatarUrl(data.avatarUrl);
+        }
+      } catch (_err) {
+        router.replace("/login");
       }
-    } catch (_err) {
-      // ignore parse errors
     }
-  }, []);
+    loadMe();
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
+
+  const resolvedAvatar =
+    avatarUrl && avatarUrl.startsWith("http")
+      ? avatarUrl
+      : avatarUrl
+        ? `${apiBase}${avatarUrl}`
+        : "/assets/images/default.png";
+
+  async function handleLogout() {
+    await fetch(`${apiBase}/auth/logout`, { method: "POST", credentials: "include" });
+    router.replace("/login");
+  }
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
@@ -49,7 +79,7 @@ export default function MePage() {
           >
             <Stack direction="row" spacing={2} alignItems="center">
               <Avatar
-                src="/assets/images/default.png"
+                src={resolvedAvatar}
                 sx={{
                   width: 44,
                   height: 44,
@@ -67,10 +97,10 @@ export default function MePage() {
             </Stack>
 
             <Stack direction="row" spacing={1}>
-              <IconButton color="inherit">
+              <IconButton color="inherit" component={Link} href="/@me/account">
                 <SettingsOutlinedIcon />
               </IconButton>
-              <IconButton color="inherit">
+              <IconButton color="inherit" onClick={handleLogout}>
                 <LogoutOutlinedIcon />
               </IconButton>
             </Stack>

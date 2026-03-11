@@ -10,6 +10,7 @@ frontend/node_modules
 
 # Backend data
 backend/data
+backend/uploads
 
 # Next.js
 frontend/.next
