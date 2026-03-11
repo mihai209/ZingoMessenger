@@ -47,12 +47,19 @@ async function initSchema() {
       table.date("birth_date").notNullable();
       table.dateTime("created_at").notNullable();
       table.string("avatar_url", 512);
+      table.string("status", 32).notNullable().defaultTo("online");
     });
   } else {
     const hasAvatar = await db.schema.hasColumn("users", "avatar_url");
     if (!hasAvatar) {
       await db.schema.alterTable("users", (table) => {
         table.string("avatar_url", 512);
+      });
+    }
+    const hasStatus = await db.schema.hasColumn("users", "status");
+    if (!hasStatus) {
+      await db.schema.alterTable("users", (table) => {
+        table.string("status", 32).notNullable().defaultTo("online");
       });
     }
   }
@@ -67,6 +74,20 @@ async function initSchema() {
       table.dateTime("last_seen_at").notNullable();
       table.index(["user_id"]);
       table.index(["expires_at"]);
+    });
+  }
+
+  const requestsExists = await db.schema.hasTable("friend_requests");
+  if (!requestsExists) {
+    await db.schema.createTable("friend_requests", (table) => {
+      table.string("id", 36).primary();
+      table.string("from_user_id", 36).notNullable();
+      table.string("to_user_id", 36).notNullable();
+      table.string("status", 32).notNullable().defaultTo("pending");
+      table.dateTime("created_at").notNullable();
+      table.index(["to_user_id"]);
+      table.index(["from_user_id"]);
+      table.index(["status"]);
     });
   }
 }

@@ -6,6 +6,8 @@ import {
   Box,
   Button,
   Container,
+  Divider,
+  Grid,
   Paper,
   Stack,
   TextField,
@@ -20,7 +22,8 @@ export default function AccountPage() {
     username: "",
     email: "",
     phone: "",
-    avatarUrl: ""
+    avatarUrl: "",
+    status: "online"
   });
   const [status, setStatus] = useState("");
   const [avatarUrlInput, setAvatarUrlInput] = useState("");
@@ -39,7 +42,8 @@ export default function AccountPage() {
           username: data.username || "",
           email: data.email || "",
           phone: data.phone || "",
-          avatarUrl: data.avatarUrl || ""
+          avatarUrl: data.avatarUrl || "",
+          status: data.status || "online"
         });
       } catch (_err) {
         router.replace("/login");
@@ -132,86 +136,105 @@ export default function AccountPage() {
   }
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "background.default", py: 4 }}>
-      <Container maxWidth="md">
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
-          <Avatar src={resolvedAvatar} sx={{ width: 56, height: 56 }} />
-          <Box>
-            <Typography variant="h5">Account</Typography>
-            <Typography variant="body2" sx={{ opacity: 0.7 }}>
-              <Link href="/@me">Back to /@me</Link>
-            </Typography>
-          </Box>
-        </Stack>
-
-        <Paper sx={{ p: 3, mb: 3 }} elevation={6}>
-          <Typography variant="h6" gutterBottom>
-            Profile
-          </Typography>
-          <Stack spacing={2}>
-            <TextField label="Username" value={profile.username} InputProps={{ readOnly: true }} />
-            <TextField label="Email" value={profile.email} InputProps={{ readOnly: true }} />
-            <TextField label="Phone" value={profile.phone} InputProps={{ readOnly: true }} />
+    <Box sx={{ minHeight: "100vh", bgcolor: "background.default", py: { xs: 3, md: 5 } }}>
+      <Container maxWidth="lg">
+        <Paper elevation={8} sx={{ p: { xs: 2.5, md: 4 }, mb: 3 }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={3}
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            justifyContent="space-between"
+          >
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Avatar src={resolvedAvatar} sx={{ width: 64, height: 64 }} />
+              <Box>
+                <Typography variant="h5">Account settings</Typography>
+                <Typography variant="body2" sx={{ opacity: 0.7 }}>
+                  <Link href="/@me">Back to /@me</Link>
+                </Typography>
+              </Box>
+            </Stack>
+            {status && (
+              <Typography color="secondary" sx={{ alignSelf: "center" }}>
+                {status}
+              </Typography>
+            )}
           </Stack>
         </Paper>
 
-        <Paper sx={{ p: 3, mb: 3 }} elevation={6}>
-          <Typography variant="h6" gutterBottom>
-            Change password
-          </Typography>
-          <Box component="form" onSubmit={handlePassword} sx={{ display: "grid", gap: 2 }}>
-            <TextField label="Current password" name="currentPassword" type="password" required />
-            <TextField label="New password" name="newPassword" type="password" required />
-            <TextField label="Confirm new password" name="newPasswordConfirm" type="password" required />
-            <Button type="submit" variant="contained">
-              Update password (logout after)
-            </Button>
-          </Box>
-        </Paper>
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={5}>
+            <Paper sx={{ p: 3 }} elevation={6}>
+              <Typography variant="h6" gutterBottom>
+                Profile
+              </Typography>
+              <Stack spacing={2}>
+                <TextField label="Username" value={profile.username} InputProps={{ readOnly: true }} />
+                <TextField label="Email" value={profile.email} InputProps={{ readOnly: true }} />
+                <TextField label="Phone" value={profile.phone} InputProps={{ readOnly: true }} />
+              </Stack>
+            </Paper>
 
-        <Paper sx={{ p: 3, mb: 3 }} elevation={6}>
-          <Typography variant="h6" gutterBottom>
-            Avatar from URL
-          </Typography>
-          <Box component="form" onSubmit={handleAvatarUrl} sx={{ display: "grid", gap: 2 }}>
-            <TextField
-              label="Avatar URL"
-              value={avatarUrlInput}
-              onChange={(e) => setAvatarUrlInput(e.target.value)}
-              placeholder="https://..."
-              required
-            />
-            <Button type="submit" variant="contained">
-              Save URL
-            </Button>
-          </Box>
-        </Paper>
+            <Paper sx={{ p: 3, mt: 3 }} elevation={6}>
+              <Typography variant="h6" gutterBottom>
+                Avatar
+              </Typography>
+              <Stack spacing={2}>
+                <Box component="form" onSubmit={handleAvatarUrl} sx={{ display: "grid", gap: 2 }}>
+                  <TextField
+                    label="Avatar URL"
+                    value={avatarUrlInput}
+                    onChange={(e) => setAvatarUrlInput(e.target.value)}
+                    placeholder="https://..."
+                    required
+                  />
+                  <Button type="submit" variant="contained">
+                    Save URL
+                  </Button>
+                </Box>
+                <Divider sx={{ my: 1 }} />
+                <Box component="form" onSubmit={handleAvatarUpload} sx={{ display: "grid", gap: 2 }}>
+                  <Button variant="outlined" component="label">
+                    Choose file
+                    <input
+                      type="file"
+                      hidden
+                      accept="image/*"
+                      onChange={(e) => setAvatarFile(e.target.files?.[0] || null)}
+                    />
+                  </Button>
+                  <Button type="submit" variant="contained">
+                    Upload
+                  </Button>
+                </Box>
+              </Stack>
+            </Paper>
+          </Grid>
 
-        <Paper sx={{ p: 3 }} elevation={6}>
-          <Typography variant="h6" gutterBottom>
-            Upload avatar
-          </Typography>
-          <Box component="form" onSubmit={handleAvatarUpload} sx={{ display: "grid", gap: 2 }}>
-            <Button variant="outlined" component="label">
-              Choose file
-              <input
-                type="file"
-                hidden
-                accept="image/*"
-                onChange={(e) => setAvatarFile(e.target.files?.[0] || null)}
-              />
-            </Button>
-            <Button type="submit" variant="contained">
-              Upload
-            </Button>
-          </Box>
-        </Paper>
-
-        {status && (
-          <Typography sx={{ mt: 2 }} color="secondary">
-            {status}
-          </Typography>
-        )}
+          <Grid item xs={12} md={7}>
+            <Paper sx={{ p: 3 }} elevation={6}>
+              <Typography variant="h6" gutterBottom>
+                Security
+              </Typography>
+              <Typography variant="body2" sx={{ opacity: 0.7, mb: 2 }}>
+                Change your password. You will be logged out after updating it.
+              </Typography>
+              <Box component="form" onSubmit={handlePassword} sx={{ display: "grid", gap: 2 }}>
+                <TextField label="Current password" name="currentPassword" type="password" required />
+                <TextField label="New password" name="newPassword" type="password" required />
+                <TextField
+                  label="Confirm new password"
+                  name="newPasswordConfirm"
+                  type="password"
+                  required
+                />
+                <Button type="submit" variant="contained">
+                  Update password (logout after)
+                </Button>
+              </Box>
+            </Paper>
+          </Grid>
+        </Grid>
       </Container>
     </Box>
   );

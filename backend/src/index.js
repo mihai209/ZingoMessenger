@@ -43,6 +43,30 @@ const upload = multer({ storage, limits: { fileSize: 2 * 1024 * 1024 } });
 
 app.use("/uploads", express.static(uploadsRoot));
 
+const sseClients = new Map();
+
+function addClient(userId, res) {
+  if (!sseClients.has(userId)) sseClients.set(userId, new Set());
+  sseClients.get(userId).add(res);
+}
+
+function removeClient(userId, res) {
+  const set = sseClients.get(userId);
+  if (!set) return;
+  set.delete(res);
+  if (set.size === 0) sseClients.delete(userId);
+}
+
+function sendEvent(userId, event, payload) {
+  const set = sseClients.get(userId);
+  if (!set) return;
+  const data = JSON.stringify(payload);
+  for (const client of set) {
+    client.write(`event: ${event}\n`);
+    client.write(`data: ${data}\n\n`);
+  }
+}
+
 app.use((req, _res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
@@ -169,7 +193,8 @@ app.post("/auth/register", async (req, res) => {
     username: username.trim(),
     email: email ? email.trim() : null,
     phone: phone ? phone.trim() : null,
-    birthDate
+    birthDate,
+    status: "online"
   });
 });
 
@@ -210,7 +235,8 @@ app.post("/auth/login", async (req, res) => {
     email: user.email,
     phone: user.phone,
     birthDate: user.birth_date,
-    avatarUrl: user.avatar_url || null
+    avatarUrl: user.avatar_url || null,
+    status: user.status || "online"
   });
 });
 
@@ -228,8 +254,51 @@ app.get("/auth/me", requireAuth, async (req, res) => {
     email: user.email,
     phone: user.phone,
     birthDate: user.birth_date,
-    avatarUrl: user.avatar_url || null
+    avatarUrl: user.avatar_url || null,
+    status: user.status || "online"
   });
+});
+
+app.get("/events", requireAuth, (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  addClient(req.user.id, res);
+
+  const keepAlive = setInterval(() => {
+    res.write(": ping\n\n");
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    removeClient(req.user.id, res);
+  });
+});
+
+app.post("/account/status", requireAuth, async (req, res) => {
+  const { status } = req.body || {};
+  const allowed = ["online", "offline", "dnd", "sleepy"];
+  if (!allowed.includes(status)) {
+    return res.status(400).json({ error: "invalid_status" });
+  }
+  await db("users").where({ id: req.user.id }).update({ status });
+  const accepted = await db("friend_requests")
+    .where({ status: "accepted" })
+    .andWhere((qb) => {
+      qb.where({ from_user_id: req.user.id }).orWhere({ to_user_id: req.user.id });
+    });
+  const friendIds = accepted.map((r) =>
+    r.from_user_id === req.user.id ? r.to_user_id : r.from_user_id
+  );
+  friendIds.forEach((fid) => {
+    sendEvent(fid, "friend_status", {
+      id: req.user.id,
+      status
+    });
+  });
+  return res.json({ ok: true, status });
 });
 
 app.post("/account/password", requireAuth, async (req, res) => {
@@ -272,6 +341,203 @@ app.post("/account/avatar/upload", requireAuth, upload.single("avatar"), async (
   const publicUrl = `/uploads/avatars/${req.file.filename}`;
   await db("users").where({ id: req.user.id }).update({ avatar_url: publicUrl });
   return res.json({ ok: true, avatarUrl: publicUrl });
+});
+
+app.post("/friends/request", requireAuth, async (req, res) => {
+  const { username } = req.body || {};
+  if (!username || typeof username !== "string") {
+    return res.status(400).json({ error: "validation_error" });
+  }
+  const target = await db("users").where({ username: username.trim() }).first();
+  if (!target) {
+    return res.status(404).json({ error: "user_not_found" });
+  }
+  if (target.id === req.user.id) {
+    return res.status(400).json({ error: "cannot_add_self" });
+  }
+
+  const existing = await db("friend_requests")
+    .where({ from_user_id: req.user.id, to_user_id: target.id, status: "pending" })
+    .first();
+  if (existing) {
+    return res.status(409).json({ error: "request_already_sent" });
+  }
+
+  const id = uuidv4();
+  const createdAt = new Date().toISOString();
+  await db("friend_requests").insert({
+    id,
+    from_user_id: req.user.id,
+    to_user_id: target.id,
+    status: "pending",
+    created_at: createdAt
+  });
+
+  sendEvent(target.id, "friend_request", {
+    id,
+    from: {
+      id: req.user.id,
+      username: req.user.username,
+      avatarUrl: req.user.avatar_url || null
+    },
+    createdAt
+  });
+
+  return res.json({ ok: true, id, toUser: target.username, createdAt });
+});
+
+app.get("/friends/inbox", requireAuth, async (req, res) => {
+  const rows = await db("friend_requests")
+    .where({ to_user_id: req.user.id, status: "pending" })
+    .orderBy("created_at", "desc");
+
+  const fromIds = rows.map((r) => r.from_user_id);
+  const users = fromIds.length ? await db("users").whereIn("id", fromIds) : [];
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  const items = rows.map((r) => {
+    const u = userMap.get(r.from_user_id);
+    return {
+      id: r.id,
+      from: {
+        id: r.from_user_id,
+        username: u?.username || "unknown",
+        avatarUrl: u?.avatar_url || null
+      },
+      createdAt: r.created_at
+    };
+  });
+
+  return res.json({ items });
+});
+
+app.post("/friends/respond", requireAuth, async (req, res) => {
+  const { requestId, action } = req.body || {};
+  const allowed = ["accept", "decline"];
+  if (!requestId || !allowed.includes(action)) {
+    return res.status(400).json({ error: "validation_error" });
+  }
+
+  const request = await db("friend_requests").where({ id: requestId }).first();
+  if (!request || request.to_user_id !== req.user.id) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  await db("friend_requests").where({ id: requestId }).update({
+    status: action === "accept" ? "accepted" : "declined"
+  });
+
+  sendEvent(request.from_user_id, "friend_response", {
+    id: request.id,
+    status: action === "accept" ? "accepted" : "declined",
+    to: { id: req.user.id, username: req.user.username }
+  });
+
+  if (action === "accept") {
+    sendEvent(request.from_user_id, "friend_added", {
+      id: req.user.id,
+      username: req.user.username,
+      avatarUrl: req.user.avatar_url || null,
+      status: req.user.status || "online"
+    });
+  }
+
+  return res.json({ ok: true, status: action });
+});
+
+app.get("/friends/sent", requireAuth, async (req, res) => {
+  const rows = await db("friend_requests")
+    .where({ from_user_id: req.user.id, status: "pending" })
+    .orderBy("created_at", "desc");
+
+  const toIds = rows.map((r) => r.to_user_id);
+  const users = toIds.length ? await db("users").whereIn("id", toIds) : [];
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  const items = rows.map((r) => {
+    const u = userMap.get(r.to_user_id);
+    return {
+      id: r.id,
+      to: {
+        id: r.to_user_id,
+        username: u?.username || "unknown",
+        avatarUrl: u?.avatar_url || null
+      },
+      createdAt: r.created_at
+    };
+  });
+
+  return res.json({ items });
+});
+
+app.post("/friends/cancel", requireAuth, async (req, res) => {
+  const { requestId } = req.body || {};
+  if (!requestId) {
+    return res.status(400).json({ error: "validation_error" });
+  }
+  const request = await db("friend_requests").where({ id: requestId }).first();
+  if (!request || request.from_user_id !== req.user.id) {
+    return res.status(404).json({ error: "not_found" });
+  }
+  if (request.status !== "pending") {
+    return res.status(409).json({ error: "not_pending" });
+  }
+  await db("friend_requests").where({ id: requestId }).update({ status: "canceled" });
+  sendEvent(request.to_user_id, "friend_cancel", { id: request.id });
+  return res.json({ ok: true });
+});
+
+app.get("/friends/list", requireAuth, async (req, res) => {
+  const accepted = await db("friend_requests")
+    .where({ status: "accepted" })
+    .andWhere((qb) => {
+      qb.where({ from_user_id: req.user.id }).orWhere({ to_user_id: req.user.id });
+    })
+    .orderBy("created_at", "desc");
+
+  const friendIds = accepted.map((r) =>
+    r.from_user_id === req.user.id ? r.to_user_id : r.from_user_id
+  );
+  const users = friendIds.length ? await db("users").whereIn("id", friendIds) : [];
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  const items = accepted.map((r) => {
+    const friendId = r.from_user_id === req.user.id ? r.to_user_id : r.from_user_id;
+    const u = userMap.get(friendId);
+    return {
+      id: friendId,
+      username: u?.username || "unknown",
+      avatarUrl: u?.avatar_url || null,
+      status: u?.status || "offline"
+    };
+  });
+
+  return res.json({ items });
+});
+
+app.post("/friends/remove", requireAuth, async (req, res) => {
+  const { friendId } = req.body || {};
+  if (!friendId) {
+    return res.status(400).json({ error: "validation_error" });
+  }
+
+  const request = await db("friend_requests")
+    .where({ status: "accepted" })
+    .andWhere((qb) => {
+      qb.where({ from_user_id: req.user.id, to_user_id: friendId }).orWhere({
+        from_user_id: friendId,
+        to_user_id: req.user.id
+      });
+    })
+    .first();
+
+  if (!request) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  await db("friend_requests").where({ id: request.id }).update({ status: "removed" });
+  sendEvent(friendId, "friend_removed", { id: req.user.id });
+  return res.json({ ok: true });
 });
 
 async function start() {
