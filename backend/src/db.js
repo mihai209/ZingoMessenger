@@ -117,6 +117,10 @@ async function initSchema() {
       table.string("sender_id", 36).notNullable();
       table.string("recipient_id", 36).notNullable();
       table.text("body").notNullable();
+      table.string("attachment_url", 512);
+      table.string("attachment_name", 255);
+      table.string("attachment_mime", 128);
+      table.integer("attachment_size");
       table.dateTime("created_at").notNullable();
       table.dateTime("read_at");
       table.dateTime("edited_at");
@@ -137,6 +141,49 @@ async function initSchema() {
         table.dateTime("deleted_at");
       });
     }
+    const hasAttachmentUrl = await db.schema.hasColumn("messages", "attachment_url");
+    if (!hasAttachmentUrl) {
+      await db.schema.alterTable("messages", (table) => {
+        table.string("attachment_url", 512);
+      });
+    }
+    const hasAttachmentName = await db.schema.hasColumn("messages", "attachment_name");
+    if (!hasAttachmentName) {
+      await db.schema.alterTable("messages", (table) => {
+        table.string("attachment_name", 255);
+      });
+    }
+    const hasAttachmentMime = await db.schema.hasColumn("messages", "attachment_mime");
+    if (!hasAttachmentMime) {
+      await db.schema.alterTable("messages", (table) => {
+        table.string("attachment_mime", 128);
+      });
+    }
+    const hasAttachmentSize = await db.schema.hasColumn("messages", "attachment_size");
+    if (!hasAttachmentSize) {
+      await db.schema.alterTable("messages", (table) => {
+        table.integer("attachment_size");
+      });
+    }
+  }
+
+  const callsExists = await db.schema.hasTable("call_history");
+  if (!callsExists) {
+    await db.schema.createTable("call_history", (table) => {
+      table.string("id", 36).primary();
+      table.string("call_id", 36).notNullable();
+      table.string("from_user_id", 36).notNullable();
+      table.string("to_user_id", 36).notNullable();
+      table.string("type", 16).notNullable();
+      table.string("status", 32).notNullable();
+      table.dateTime("started_at").notNullable();
+      table.dateTime("accepted_at");
+      table.dateTime("ended_at");
+      table.integer("duration_seconds");
+      table.index(["from_user_id"]);
+      table.index(["to_user_id"]);
+      table.index(["call_id"]);
+    });
   }
 }
 

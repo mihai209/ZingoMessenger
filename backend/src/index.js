@@ -30,7 +30,17 @@ app.use(cookieParser());
 
 const uploadsRoot = path.join(__dirname, "..", "uploads");
 const avatarsDir = path.join(uploadsRoot, "avatars");
+const chatUploadsDir = path.join(uploadsRoot, "chat");
 fs.mkdirSync(avatarsDir, { recursive: true });
+fs.mkdirSync(chatUploadsDir, { recursive: true });
+
+function resolveUploadPath(publicUrl) {
+  if (!publicUrl || typeof publicUrl !== "string") return null;
+  if (!publicUrl.startsWith("/uploads/")) return null;
+  const relative = publicUrl.replace("/uploads/", "");
+  const normalized = path.normalize(relative).replace(/^(\.\.(\/|\\|$))+/, "");
+  return path.join(uploadsRoot, normalized);
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, avatarsDir),
@@ -40,10 +50,22 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage, limits: { fileSize: 2 * 1024 * 1024 } });
+const chatUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, chatUploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || ".bin");
+      cb(null, `${uuidv4()}${ext}`);
+    }
+  }),
+  limits: { fileSize: 400 * 1024 * 1024 }
+});
 
 app.use("/uploads", express.static(uploadsRoot));
 
 const sseClients = new Map();
+const activeCalls = new Map();
+const userActiveCall = new Map();
 
 function addClient(userId, res) {
   if (!sseClients.has(userId)) sseClients.set(userId, new Set());
@@ -65,6 +87,51 @@ function sendEvent(userId, event, payload) {
     client.write(`event: ${event}\n`);
     client.write(`data: ${data}\n\n`);
   }
+}
+
+function getOtherCallParticipant(call, userId) {
+  if (!call) return null;
+  if (call.fromId === userId) return call.toId;
+  if (call.toId === userId) return call.fromId;
+  return null;
+}
+
+function clearCall(callId, reason) {
+  const call = activeCalls.get(callId);
+  if (!call) return;
+  if (call.timeoutHandle) {
+    clearTimeout(call.timeoutHandle);
+  }
+  activeCalls.delete(callId);
+  if (call.fromId) userActiveCall.delete(call.fromId);
+  if (call.toId) userActiveCall.delete(call.toId);
+  if (reason) {
+    sendEvent(call.fromId, reason, { callId });
+    sendEvent(call.toId, reason, { callId });
+  }
+}
+
+async function updateCallHistory(call, status) {
+  if (!call?.historyId) return;
+  const now = new Date();
+  const update = { status };
+  if (status === "accepted") {
+    update.accepted_at = now.toISOString();
+  }
+  if (["declined", "timeout", "ended"].includes(status)) {
+    update.ended_at = now.toISOString();
+    const start = call.acceptedAt || call.createdAt;
+    if (start) {
+      const duration = Math.max(
+        0,
+        Math.floor((now.getTime() - new Date(start).getTime()) / 1000)
+      );
+      update.duration_seconds = duration;
+    }
+  }
+  await db("call_history").where({ id: call.historyId }).update(update);
+  sendEvent(call.fromId, "call_history", { callId: call.id });
+  sendEvent(call.toId, "call_history", { callId: call.id });
 }
 
 app.use((req, _res, next) => {
@@ -647,6 +714,10 @@ app.get("/chats/:chatId/messages", requireAuth, requireChatMember, async (req, r
     id: m.id,
     fromId: m.sender_id,
     body: m.body,
+    attachmentUrl: m.attachment_url || null,
+    attachmentName: m.attachment_name || null,
+    attachmentMime: m.attachment_mime || null,
+    attachmentSize: m.attachment_size || null,
     createdAt: m.created_at,
     editedAt: m.edited_at || null,
     deletedAt: m.deleted_at || null
@@ -680,6 +751,10 @@ app.post("/chats/:chatId/messages", requireAuth, requireChatMember, async (req, 
     sender_id: req.user.id,
     recipient_id: other.user_id,
     body: body.trim(),
+    attachment_url: null,
+    attachment_name: null,
+    attachment_mime: null,
+    attachment_size: null,
     created_at: createdAt
   });
 
@@ -694,12 +769,91 @@ app.post("/chats/:chatId/messages", requireAuth, requireChatMember, async (req, 
         avatarUrl: req.user.avatar_url || null
       },
       body: body.trim(),
+      attachmentUrl: null,
+      attachmentName: null,
+      attachmentMime: null,
+      attachmentSize: null,
       createdAt
     });
   }
 
   return res.json({ ok: true, id, createdAt });
 });
+
+app.post(
+  "/chats/:chatId/attachments",
+  requireAuth,
+  requireChatMember,
+  chatUpload.single("file"),
+  async (req, res) => {
+    const chatId = req.params.chatId;
+    if (!req.file) {
+      return res.status(400).json({ error: "file_required" });
+    }
+
+    const members = await db("chat_members").where({ chat_id: chatId });
+    const other = members.find((m) => m.user_id !== req.user.id);
+    if (!other) {
+      return res.status(400).json({ error: "invalid_chat" });
+    }
+
+    const friendsOk = await areFriends(req.user.id, other.user_id);
+    if (!friendsOk) {
+      return res.status(403).json({ error: "chat_locked" });
+    }
+
+    const id = uuidv4();
+    const createdAt = new Date().toISOString();
+    const publicUrl = `/uploads/chat/${req.file.filename}`;
+    await db("messages").insert({
+      id,
+      chat_id: chatId,
+      sender_id: req.user.id,
+      recipient_id: other.user_id,
+      body: "",
+      attachment_url: publicUrl,
+      attachment_name: req.file.originalname || "attachment",
+      attachment_mime: req.file.mimetype || "application/octet-stream",
+      attachment_size: req.file.size || null,
+      created_at: createdAt
+    });
+
+    const recipient = await db("users").where({ id: other.user_id }).first();
+    if (recipient && ["online", "sleepy"].includes(recipient.status || "offline")) {
+      sendEvent(recipient.id, "message", {
+        chatId,
+        id,
+        from: {
+          id: req.user.id,
+          username: req.user.username,
+          avatarUrl: req.user.avatar_url || null
+        },
+        body: "",
+        attachmentUrl: publicUrl,
+        attachmentName: req.file.originalname || "attachment",
+        attachmentMime: req.file.mimetype || "application/octet-stream",
+        attachmentSize: req.file.size || null,
+        createdAt
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: {
+        id,
+        fromId: req.user.id,
+        body: "",
+        attachmentUrl: publicUrl,
+        attachmentName: req.file.originalname || "attachment",
+        attachmentMime: req.file.mimetype || "application/octet-stream",
+        attachmentSize: req.file.size || null,
+        createdAt,
+        editedAt: null,
+        deletedAt: null
+      }
+    });
+  }
+);
 
 app.patch("/chats/:chatId/messages/:messageId", requireAuth, requireChatMember, async (req, res) => {
   const chatId = req.params.chatId;
@@ -718,6 +872,9 @@ app.patch("/chats/:chatId/messages/:messageId", requireAuth, requireChatMember, 
   }
   if (message.deleted_at) {
     return res.status(409).json({ error: "already_deleted" });
+  }
+  if (message.attachment_url) {
+    return res.status(409).json({ error: "attachment_message" });
   }
 
   const editedAt = new Date().toISOString();
@@ -767,9 +924,22 @@ app.delete(
     }
 
     const deletedAt = new Date().toISOString();
+    if (message.attachment_url) {
+      const filePath = resolveUploadPath(message.attachment_url);
+      if (filePath) {
+        fs.promises.unlink(filePath).catch(() => {});
+      }
+    }
     await db("messages")
       .where({ id: messageId })
-      .update({ body: "", deleted_at: deletedAt });
+      .update({
+        body: "",
+        deleted_at: deletedAt,
+        attachment_url: null,
+        attachment_name: null,
+        attachment_mime: null,
+        attachment_size: null
+      });
 
     const members = await db("chat_members").where({ chat_id: chatId });
     const other = members.find((m) => m.user_id !== req.user.id);
@@ -799,6 +969,219 @@ app.post("/chats/:chatId/read", requireAuth, requireChatMember, async (req, res)
     .whereNull("read_at")
     .update({ read_at: new Date().toISOString() });
   return res.json({ ok: true });
+});
+
+app.post("/calls/start", requireAuth, async (req, res) => {
+  const { username, type } = req.body || {};
+  const allowedTypes = ["audio", "video"];
+  if (!username || typeof username !== "string" || !allowedTypes.includes(type)) {
+    return res.status(400).json({ error: "validation_error" });
+  }
+  const target = await db("users").where({ username: username.trim() }).first();
+  if (!target) {
+    return res.status(404).json({ error: "user_not_found" });
+  }
+  if (userActiveCall.has(req.user.id) || userActiveCall.has(target.id)) {
+    return res.status(409).json({ error: "busy" });
+  }
+  const ok = await areFriends(req.user.id, target.id);
+  if (!ok) {
+    return res.status(403).json({ error: "not_friends" });
+  }
+
+  const callId = uuidv4();
+  const call = {
+    id: callId,
+    type,
+    fromId: req.user.id,
+    toId: target.id,
+    createdAt: new Date().toISOString(),
+    status: "ringing",
+    acceptedAt: null
+  };
+  const historyId = uuidv4();
+  call.historyId = historyId;
+  await db("call_history").insert({
+    id: historyId,
+    call_id: callId,
+    from_user_id: req.user.id,
+    to_user_id: target.id,
+    type,
+    status: "ringing",
+    started_at: call.createdAt
+  });
+  const timeoutSeconds = Number(process.env.CALL_TIMEOUT_SEC || 30);
+  call.timeoutHandle = setTimeout(() => {
+    updateCallHistory(call, "timeout").catch(() => {});
+    clearCall(callId, "call_timeout");
+  }, timeoutSeconds * 1000);
+  activeCalls.set(callId, call);
+  userActiveCall.set(req.user.id, callId);
+  userActiveCall.set(target.id, callId);
+
+  sendEvent(target.id, "call_invite", {
+    callId,
+    type,
+    from: {
+      id: req.user.id,
+      username: req.user.username,
+      avatarUrl: req.user.avatar_url || null
+    }
+  });
+
+  return res.json({ ok: true, callId });
+});
+
+app.get("/calls/:callId", requireAuth, async (req, res) => {
+  const callId = req.params.callId;
+  const call = activeCalls.get(callId);
+  if (!call) return res.status(404).json({ error: "not_found" });
+  const other = getOtherCallParticipant(call, req.user.id);
+  if (!other) return res.status(403).json({ error: "not_allowed" });
+  const users = await db("users").whereIn("id", [call.fromId, call.toId]);
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  const safeCall = { ...call };
+  delete safeCall.timeoutHandle;
+  return res.json({
+    call: {
+      ...safeCall,
+      from: {
+        id: call.fromId,
+        username: userMap.get(call.fromId)?.username || "unknown",
+        avatarUrl: userMap.get(call.fromId)?.avatar_url || null
+      },
+      to: {
+        id: call.toId,
+        username: userMap.get(call.toId)?.username || "unknown",
+        avatarUrl: userMap.get(call.toId)?.avatar_url || null
+      }
+    }
+  });
+});
+
+app.post("/calls/:callId/accept", requireAuth, async (req, res) => {
+  const callId = req.params.callId;
+  const call = activeCalls.get(callId);
+  if (!call) return res.status(404).json({ error: "not_found" });
+  if (call.toId !== req.user.id) return res.status(403).json({ error: "not_allowed" });
+  if (call.status === "accepted") return res.json({ ok: true });
+  call.status = "accepted";
+  call.acceptedAt = new Date().toISOString();
+  if (call.timeoutHandle) {
+    clearTimeout(call.timeoutHandle);
+    call.timeoutHandle = null;
+  }
+  updateCallHistory(call, "accepted").catch(() => {});
+  sendEvent(call.fromId, "call_accept", { callId });
+  return res.json({ ok: true });
+});
+
+app.post("/calls/:callId/decline", requireAuth, async (req, res) => {
+  const callId = req.params.callId;
+  const call = activeCalls.get(callId);
+  if (!call) return res.status(404).json({ error: "not_found" });
+  const other = getOtherCallParticipant(call, req.user.id);
+  if (!other) return res.status(403).json({ error: "not_allowed" });
+  sendEvent(other, "call_decline", { callId });
+  updateCallHistory(call, "declined").catch(() => {});
+  clearCall(callId);
+  return res.json({ ok: true });
+});
+
+app.post("/calls/:callId/offer", requireAuth, async (req, res) => {
+  const callId = req.params.callId;
+  const { sdp } = req.body || {};
+  if (!sdp) return res.status(400).json({ error: "validation_error" });
+  const call = activeCalls.get(callId);
+  if (!call) return res.status(404).json({ error: "not_found" });
+  if (call.status !== "accepted") {
+    return res.status(409).json({ error: "not_accepted" });
+  }
+  const other = getOtherCallParticipant(call, req.user.id);
+  if (!other) return res.status(403).json({ error: "not_allowed" });
+  sendEvent(other, "call_offer", { callId, sdp });
+  return res.json({ ok: true });
+});
+
+app.post("/calls/:callId/answer", requireAuth, async (req, res) => {
+  const callId = req.params.callId;
+  const { sdp } = req.body || {};
+  if (!sdp) return res.status(400).json({ error: "validation_error" });
+  const call = activeCalls.get(callId);
+  if (!call) return res.status(404).json({ error: "not_found" });
+  if (call.status !== "accepted") {
+    return res.status(409).json({ error: "not_accepted" });
+  }
+  const other = getOtherCallParticipant(call, req.user.id);
+  if (!other) return res.status(403).json({ error: "not_allowed" });
+  sendEvent(other, "call_answer", { callId, sdp });
+  return res.json({ ok: true });
+});
+
+app.post("/calls/:callId/ice", requireAuth, async (req, res) => {
+  const callId = req.params.callId;
+  const { candidate } = req.body || {};
+  if (!candidate) return res.status(400).json({ error: "validation_error" });
+  const call = activeCalls.get(callId);
+  if (!call) return res.status(404).json({ error: "not_found" });
+  if (call.status !== "accepted") {
+    return res.status(409).json({ error: "not_accepted" });
+  }
+  const other = getOtherCallParticipant(call, req.user.id);
+  if (!other) return res.status(403).json({ error: "not_allowed" });
+  sendEvent(other, "call_ice", { callId, candidate });
+  return res.json({ ok: true });
+});
+
+app.post("/calls/:callId/leave", requireAuth, async (req, res) => {
+  const callId = req.params.callId;
+  const call = activeCalls.get(callId);
+  if (!call) return res.status(404).json({ error: "not_found" });
+  const other = getOtherCallParticipant(call, req.user.id);
+  if (!other) return res.status(403).json({ error: "not_allowed" });
+  sendEvent(other, "call_leave", { callId });
+  updateCallHistory(call, "ended").catch(() => {});
+  clearCall(callId);
+  return res.json({ ok: true });
+});
+
+app.get("/calls/history", requireAuth, async (req, res) => {
+  const rows = await db("call_history")
+    .where({ from_user_id: req.user.id })
+    .orWhere({ to_user_id: req.user.id })
+    .orderBy("started_at", "desc")
+    .limit(50);
+
+  const userIds = Array.from(
+    new Set(rows.flatMap((r) => [r.from_user_id, r.to_user_id]))
+  );
+  const users = userIds.length ? await db("users").whereIn("id", userIds) : [];
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  const items = rows.map((r) => {
+    const from = userMap.get(r.from_user_id);
+    const to = userMap.get(r.to_user_id);
+    const isOutgoing = r.from_user_id === req.user.id;
+    const other = isOutgoing ? to : from;
+    return {
+      id: r.id,
+      callId: r.call_id,
+      type: r.type,
+      status: r.status,
+      startedAt: r.started_at,
+      acceptedAt: r.accepted_at,
+      endedAt: r.ended_at,
+      durationSeconds: r.duration_seconds,
+      direction: isOutgoing ? "outgoing" : "incoming",
+      other: {
+        id: other?.id || null,
+        username: other?.username || "unknown",
+        avatarUrl: other?.avatar_url || null
+      }
+    };
+  });
+
+  return res.json({ items });
 });
 
 async function start() {

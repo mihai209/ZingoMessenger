@@ -21,3 +21,6 @@ frontend-web
 jurnal.md
 .gradle
 .kotlin
+.zip
+backend/*.zip
+frontend/*.zip

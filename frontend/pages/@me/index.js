@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import {
@@ -10,10 +11,12 @@ import {
   IconButton,
   Menu,
   MenuItem,
+  Popover,
   Paper,
   Tab,
   Tabs,
   Select,
+  Slider,
   Stack,
   Typography
 } from "@mui/material";
@@ -21,6 +24,185 @@ import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
+import InsertEmoticonOutlinedIcon from "@mui/icons-material/InsertEmoticonOutlined";
+import AttachFileOutlinedIcon from "@mui/icons-material/AttachFileOutlined";
+import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
+import PauseRoundedIcon from "@mui/icons-material/PauseRounded";
+import VolumeUpRoundedIcon from "@mui/icons-material/VolumeUpRounded";
+import VolumeOffRoundedIcon from "@mui/icons-material/VolumeOffRounded";
+import FullscreenRoundedIcon from "@mui/icons-material/FullscreenRounded";
+import PhoneRoundedIcon from "@mui/icons-material/PhoneRounded";
+import VideocamRoundedIcon from "@mui/icons-material/VideocamRounded";
+import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
+import emojiData from "@emoji-mart/data";
+import CallModal from "../../components/CallModal";
+
+const EmojiPicker = dynamic(() => import("@emoji-mart/react"), { ssr: false });
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds)) return "0:00";
+  const total = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function MediaPlayer({ type, src, tone = "light" }) {
+  const mediaRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(0.9);
+  const [muted, setMuted] = useState(false);
+  const [rate, setRate] = useState(1);
+
+  useEffect(() => {
+    const el = mediaRef.current;
+    if (!el) return;
+    el.volume = volume;
+    el.muted = muted;
+    el.playbackRate = rate;
+    const onTime = () => setCurrentTime(el.currentTime || 0);
+    const onLoaded = () => setDuration(el.duration || 0);
+    const onEnded = () => setPlaying(false);
+    el.addEventListener("timeupdate", onTime);
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("ended", onEnded);
+    return () => {
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("ended", onEnded);
+    };
+  }, [volume, muted, rate]);
+
+  const togglePlay = async () => {
+    const el = mediaRef.current;
+    if (!el) return;
+    if (el.paused) {
+      try {
+        await el.play();
+        setPlaying(true);
+      } catch (_err) {
+        // ignore
+      }
+    } else {
+      el.pause();
+      setPlaying(false);
+    }
+  };
+
+  const handleSeek = (_e, value) => {
+    const el = mediaRef.current;
+    if (!el) return;
+    const next = Number(value);
+    el.currentTime = next;
+    setCurrentTime(next);
+  };
+
+  const handleVolume = (_e, value) => {
+    const next = Number(value);
+    setVolume(next);
+    if (next > 0 && muted) setMuted(false);
+  };
+
+  const toggleMute = () => {
+    setMuted((prev) => !prev);
+  };
+
+  const handleRate = (event) => {
+    const next = Number(event.target.value);
+    setRate(next);
+  };
+
+  const handleFullscreen = () => {
+    const el = mediaRef.current;
+    if (!el || !el.requestFullscreen) return;
+    el.requestFullscreen().catch(() => {});
+  };
+
+  const commonMediaProps = {
+    ref: mediaRef,
+    src
+  };
+  const controlColor = tone === "dark" ? "rgba(0,0,0,0.85)" : "rgba(255,255,255,0.9)";
+  const sliderSx =
+    tone === "dark"
+      ? {
+          color: "rgba(0,0,0,0.85)",
+          "& .MuiSlider-rail": { opacity: 0.3 },
+          "& .MuiSlider-thumb": { border: "2px solid rgba(0,0,0,0.85)" }
+        }
+      : {
+          color: "rgba(255,255,255,0.9)",
+          "& .MuiSlider-rail": { opacity: 0.4 }
+        };
+
+  return (
+    <Box sx={{ width: "100%", maxWidth: type === "video" ? 420 : 320 }}>
+      {type === "video" ? (
+        <Box
+          component="video"
+          {...commonMediaProps}
+          sx={{
+            width: "100%",
+            borderRadius: 1,
+            bgcolor: "rgba(0,0,0,0.4)"
+          }}
+        />
+      ) : (
+        <Box component="audio" {...commonMediaProps} />
+      )}
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+        <IconButton size="small" onClick={togglePlay} sx={{ color: controlColor }}>
+          {playing ? <PauseRoundedIcon /> : <PlayArrowRoundedIcon />}
+        </IconButton>
+        <Slider
+          size="small"
+          min={0}
+          max={duration || 0}
+          step={1}
+          value={Math.min(currentTime, duration || 0)}
+          onChange={handleSeek}
+          sx={{ flex: 1, ...sliderSx }}
+        />
+        <Typography variant="caption" sx={{ opacity: 0.7, color: controlColor }}>
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </Typography>
+      </Stack>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+        <IconButton size="small" onClick={toggleMute} sx={{ color: controlColor }}>
+          {muted || volume === 0 ? <VolumeOffRoundedIcon /> : <VolumeUpRoundedIcon />}
+        </IconButton>
+        <Slider
+          size="small"
+          min={0}
+          max={1}
+          step={0.01}
+          value={muted ? 0 : volume}
+          onChange={handleVolume}
+          sx={{ width: 120, ...sliderSx }}
+        />
+        <Select
+          size="small"
+          value={rate}
+          onChange={handleRate}
+          sx={{ minWidth: 80, color: controlColor }}
+        >
+          {[0.5, 0.75, 1, 1.25, 1.5, 2].map((val) => (
+            <MenuItem key={val} value={val}>
+              {val}x
+            </MenuItem>
+          ))}
+        </Select>
+        {type === "video" && (
+          <IconButton size="small" onClick={handleFullscreen} sx={{ color: controlColor }}>
+            <FullscreenRoundedIcon />
+          </IconButton>
+        )}
+      </Stack>
+    </Box>
+  );
+}
 
 export default function MePage() {
   const [userId, setUserId] = useState("");
@@ -30,6 +212,7 @@ export default function MePage() {
   const [inbox, setInbox] = useState([]);
   const [sent, setSent] = useState([]);
   const [friends, setFriends] = useState([]);
+  const [callHistory, setCallHistory] = useState([]);
   const [addStatus, setAddStatus] = useState("");
   const [panel, setPanel] = useState("add");
   const [activeChat, setActiveChat] = useState(null);
@@ -39,8 +222,16 @@ export default function MePage() {
   const [contextMenu, setContextMenu] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editingValue, setEditingValue] = useState("");
+  const [emojiAnchor, setEmojiAnchor] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [callInfo, setCallInfo] = useState("");
+  const [ringing, setRinging] = useState(false);
+  const [callSession, setCallSession] = useState(null);
   const messagesEndRef = useRef(null);
   const activeChatRef = useRef(null);
+  const fileInputRef = useRef(null);
   const router = useRouter();
   const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
 
@@ -84,6 +275,14 @@ export default function MePage() {
         const friendsData = await friendsRes.json().catch(() => ({ items: [] }));
         if (isMounted && friendsData?.items) {
           setFriends(friendsData.items);
+        }
+
+        const callsRes = await fetch(`${apiBase}/calls/history`, {
+          credentials: "include"
+        });
+        const callsData = await callsRes.json().catch(() => ({ items: [] }));
+        if (isMounted && callsData?.items) {
+          setCallHistory(callsData.items);
         }
 
         es = new EventSource(`${apiBase}/events`, { withCredentials: true });
@@ -142,6 +341,10 @@ export default function MePage() {
                   id: payload.id || payload.createdAt,
                   fromId: payload.from.id,
                   body: payload.body,
+                  attachmentUrl: payload.attachmentUrl || null,
+                  attachmentName: payload.attachmentName || null,
+                  attachmentMime: payload.attachmentMime || null,
+                  attachmentSize: payload.attachmentSize || null,
                   createdAt: payload.createdAt,
                   editedAt: null,
                   deletedAt: null
@@ -208,6 +411,42 @@ export default function MePage() {
             // ignore
           }
         });
+        es.addEventListener("call_invite", (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            setIncomingCall(payload);
+            setRinging(true);
+          } catch (_err) {
+            // ignore
+          }
+        });
+        es.addEventListener("call_decline", () => {
+          setCallInfo("Call declined.");
+          setRinging(false);
+          setCallSession(null);
+        });
+        es.addEventListener("call_timeout", () => {
+          setCallInfo("Call timed out.");
+          setRinging(false);
+          setCallSession(null);
+        });
+        es.addEventListener("call_busy", () => {
+          setCallInfo("User is busy.");
+          setRinging(false);
+          setCallSession(null);
+        });
+        es.addEventListener("call_leave", () => {
+          setCallInfo("Call ended.");
+          setRinging(false);
+          setCallSession(null);
+        });
+        es.addEventListener("call_history", async () => {
+          const callsRes = await fetch(`${apiBase}/calls/history`, {
+            credentials: "include"
+          });
+          const callsData = await callsRes.json().catch(() => ({ items: [] }));
+          setCallHistory(callsData.items || []);
+        });
         es.addEventListener("friend_cancel", (event) => {
           try {
             const payload = JSON.parse(event.data);
@@ -242,6 +481,23 @@ export default function MePage() {
     offline: "#94a3b8",
     dnd: "#ff5d5d",
     sleepy: "#f6c945"
+  };
+
+  const resolveAttachmentUrl = (url) => {
+    if (!url) return "";
+    return url.startsWith("http") ? url : `${apiBase}${url}`;
+  };
+
+  const formatBytes = (value) => {
+    if (!value && value !== 0) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let size = Number(value);
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   };
 
   async function handleLogout() {
@@ -363,7 +619,9 @@ export default function MePage() {
   }
 
   function openContextMenu(e, message) {
-    if (message.fromId !== userId || message.deletedAt) return;
+    if (message.deletedAt) return;
+    const isMine = message.fromId === userId;
+    if (!isMine && !message.attachmentUrl) return;
     e.preventDefault();
     setContextMenu({
       mouseX: e.clientX - 2,
@@ -374,6 +632,48 @@ export default function MePage() {
 
   function closeContextMenu() {
     setContextMenu(null);
+  }
+
+  function openEmojiPicker(e) {
+    setEmojiAnchor(e.currentTarget);
+  }
+
+  function closeEmojiPicker() {
+    setEmojiAnchor(null);
+  }
+
+  async function handleAttachmentChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!activeChat || !canChat) return;
+    setUploadError("");
+    if (file.size > 400 * 1024 * 1024) {
+      setUploadError("File too large (max 400MB).");
+      return;
+    }
+    const form = new FormData();
+    form.append("file", file);
+    setUploading(true);
+    try {
+      const res = await fetch(`${apiBase}/chats/${activeChat.chatId}/attachments`, {
+        method: "POST",
+        body: form,
+        credentials: "include"
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setUploadError(data?.error || "Upload failed.");
+        return;
+      }
+      if (data?.message) {
+        setMessages((prev) => [...prev, data.message]);
+      }
+    } catch (_err) {
+      setUploadError("Upload failed.");
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function handleEditSave() {
@@ -416,6 +716,68 @@ export default function MePage() {
     );
   }
 
+  function handleDownloadAttachment(message) {
+    if (!message?.attachmentUrl) return;
+    const url = resolveAttachmentUrl(message.attachmentUrl);
+    fetch(url, { credentials: "include" })
+      .then((res) => res.blob())
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = message.attachmentName || "attachment";
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(blobUrl);
+      })
+      .catch(() => {});
+  }
+
+  async function handleStartCall(type) {
+    if (!activeChat) return;
+    setCallInfo("");
+    const res = await fetch(`${apiBase}/calls/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: activeChat.username, type }),
+      credentials: "include"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.callId) {
+      if (data?.error === "busy") {
+        setCallInfo("User is busy.");
+      } else {
+        setCallInfo("Call failed to start.");
+      }
+      setRinging(false);
+      return;
+    }
+    setCallSession({ callId: data.callId, type, role: "caller" });
+  }
+
+  async function acceptCall() {
+    if (!incomingCall) return;
+    await fetch(`${apiBase}/calls/${incomingCall.callId}/accept`, {
+      method: "POST",
+      credentials: "include"
+    });
+    setCallSession({ callId: incomingCall.callId, type: incomingCall.type, role: "callee" });
+    setIncomingCall(null);
+    setRinging(false);
+  }
+
+  async function declineCall() {
+    if (!incomingCall) return;
+    await fetch(`${apiBase}/calls/${incomingCall.callId}/decline`, {
+      method: "POST",
+      credentials: "include"
+    });
+    setIncomingCall(null);
+    setRinging(false);
+  }
+
   async function sendMessage(e) {
     e.preventDefault();
     if (!activeChat || !canChat || !messageInput.trim()) return;
@@ -452,6 +814,51 @@ export default function MePage() {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages]);
+
+  const menuMessage = contextMenu?.message || null;
+  const menuCanEdit =
+    menuMessage && menuMessage.fromId === userId && !menuMessage.attachmentUrl;
+  const menuCanDelete = menuMessage && menuMessage.fromId === userId;
+  const menuCanDownload = Boolean(menuMessage?.attachmentUrl);
+
+  useEffect(() => {
+    if (!ringing) return;
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.12;
+    gain.connect(ctx.destination);
+
+    let osc;
+    let timer;
+    const startTone = () => {
+      osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = 440;
+      osc.connect(gain);
+      osc.start();
+      setTimeout(() => {
+        if (osc) {
+          osc.stop();
+          osc.disconnect();
+          osc = null;
+        }
+      }, 700);
+    };
+
+    startTone();
+    timer = setInterval(startTone, 1400);
+
+    return () => {
+      clearInterval(timer);
+      if (osc) {
+        osc.stop();
+        osc.disconnect();
+      }
+      ctx.close();
+    };
+  }, [ringing]);
 
   return (
     <>
@@ -599,6 +1006,7 @@ export default function MePage() {
                 }
               />
               <Tab value="sent" label="Sent" />
+              <Tab value="calls" label="Calls" />
             </Tabs>
 
             {panel === "add" && (
@@ -701,6 +1109,50 @@ export default function MePage() {
               </Box>
             )}
 
+            {panel === "calls" && (
+              <Box>
+                <Typography variant="subtitle1" sx={{ mb: 1.5 }}>
+                  Call history
+                </Typography>
+                <Stack spacing={1.5}>
+                  {callHistory.length === 0 && (
+                    <Typography variant="caption" sx={{ opacity: 0.6 }}>
+                      No calls yet.
+                    </Typography>
+                  )}
+                  {callHistory.map((call) => (
+                    <Stack key={call.id} direction="row" spacing={1.5} alignItems="center">
+                      <Avatar
+                        src={
+                          call.other.avatarUrl
+                            ? call.other.avatarUrl.startsWith("http")
+                              ? call.other.avatarUrl
+                              : `${apiBase}${call.other.avatarUrl}`
+                            : "/assets/images/default.png"
+                        }
+                        sx={{ width: 32, height: 32 }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="body2">
+                          {call.other.username}
+                          {call.type === "video" ? " • Video" : " • Audio"}
+                        </Typography>
+                        <Typography variant="caption" sx={{ opacity: 0.6 }}>
+                          {call.status}
+                          {call.durationSeconds
+                            ? ` • ${Math.floor(call.durationSeconds / 60)}:${String(
+                                call.durationSeconds % 60
+                              ).padStart(2, "0")}`
+                            : ""}
+                        </Typography>
+                      </Box>
+                      <HistoryRoundedIcon sx={{ opacity: 0.5 }} fontSize="small" />
+                    </Stack>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
             <Divider sx={{ my: 2 }} />
 
             <Typography variant="subtitle1" sx={{ mb: 1.5 }}>
@@ -757,9 +1209,69 @@ export default function MePage() {
 
           <Paper sx={{ p: { xs: 3, sm: 4 } }} elevation={8}>
             <Stack spacing={2}>
-              <Typography variant="h5">
-                {activeChat ? `Chat with ${activeChat.username}` : "Select a friend to chat"}
-              </Typography>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography variant="h5">
+                  {activeChat ? `Chat with ${activeChat.username}` : "Select a friend to chat"}
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <IconButton
+                    color="inherit"
+                    onClick={() => handleStartCall("audio")}
+                    disabled={!activeChat || !canChat}
+                  >
+                    <PhoneRoundedIcon />
+                  </IconButton>
+                  <IconButton
+                    color="inherit"
+                    onClick={() => handleStartCall("video")}
+                    disabled={!activeChat || !canChat}
+                  >
+                    <VideocamRoundedIcon />
+                  </IconButton>
+                </Stack>
+              </Stack>
+              {incomingCall && (
+                <Paper
+                  elevation={0}
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    bgcolor: "rgba(56,189,248,0.16)",
+                    border: "1px solid rgba(56,189,248,0.5)"
+                  }}
+                >
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center">
+                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}>
+                      <Avatar
+                        src={
+                          incomingCall.from?.avatarUrl
+                            ? incomingCall.from.avatarUrl.startsWith("http")
+                              ? incomingCall.from.avatarUrl
+                              : `${apiBase}${incomingCall.from.avatarUrl}`
+                            : "/assets/images/default.png"
+                        }
+                        sx={{ width: 36, height: 36 }}
+                      />
+                      <Typography variant="body2">
+                        Incoming {incomingCall.type} call from {incomingCall.from?.username}
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={1}>
+                      <Button size="small" variant="contained" onClick={acceptCall}>
+                        Accept
+                      </Button>
+                      <Button size="small" variant="outlined" onClick={declineCall}>
+                        Decline
+                      </Button>
+                    </Stack>
+                  </Stack>
+                </Paper>
+              )}
+              {callInfo && (
+                <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                  {callInfo}
+                </Typography>
+              )}
               {activeChat && !canChat && (
                 <Box
                   sx={{
@@ -794,6 +1306,8 @@ export default function MePage() {
                     const isMine = m.fromId === userId || m.fromId === "me";
                     const isDeleted = Boolean(m.deletedAt);
                     const isEditing = editingId === m.id;
+                    const isAttachment = Boolean(m.attachmentUrl);
+                    const attachmentUrl = isAttachment ? resolveAttachmentUrl(m.attachmentUrl) : "";
                     return (
                       <Box
                         key={m.id}
@@ -806,7 +1320,8 @@ export default function MePage() {
                           py: 1,
                           borderRadius: 2,
                           maxWidth: "80%",
-                          cursor: isMine && !isDeleted ? "context-menu" : "default"
+                          cursor:
+                            !isDeleted && (isMine || isAttachment) ? "context-menu" : "default"
                         }}
                       >
                         {isDeleted ? (
@@ -829,6 +1344,42 @@ export default function MePage() {
                               </Button>
                             </Stack>
                           </Stack>
+                        ) : isAttachment ? (
+                          <Stack spacing={1}>
+                            {m.attachmentMime?.startsWith("image/") && (
+                              <Box
+                                component="img"
+                                src={attachmentUrl}
+                                alt={m.attachmentName || "image"}
+                                sx={{ width: "100%", maxWidth: 320, borderRadius: 1 }}
+                              />
+                            )}
+                            {m.attachmentMime?.startsWith("video/") && (
+                              <MediaPlayer
+                                type="video"
+                                src={attachmentUrl}
+                                tone={isMine ? "dark" : "light"}
+                              />
+                            )}
+                            {m.attachmentMime?.startsWith("audio/") && (
+                              <MediaPlayer
+                                type="audio"
+                                src={attachmentUrl}
+                                tone={isMine ? "dark" : "light"}
+                              />
+                            )}
+                            {!m.attachmentMime?.startsWith("image/") &&
+                              !m.attachmentMime?.startsWith("video/") &&
+                              !m.attachmentMime?.startsWith("audio/") && (
+                                <Typography variant="body2">
+                                  {m.attachmentName || "attachment"}
+                                </Typography>
+                              )}
+                            <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                              {m.attachmentName || "attachment"}
+                              {m.attachmentSize ? ` • ${formatBytes(m.attachmentSize)}` : ""}
+                            </Typography>
+                          </Stack>
                         ) : (
                           <>
                             <Typography variant="body2">{m.body}</Typography>
@@ -846,17 +1397,46 @@ export default function MePage() {
                 <div ref={messagesEndRef} />
               </Box>
               <Box component="form" onSubmit={sendMessage} sx={{ display: "flex", gap: 2 }}>
+                <IconButton
+                  onClick={openEmojiPicker}
+                  disabled={!activeChat || !canChat}
+                  color="inherit"
+                >
+                  <InsertEmoticonOutlinedIcon />
+                </IconButton>
+                <IconButton
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!activeChat || !canChat || uploading}
+                  color="inherit"
+                >
+                  <AttachFileOutlinedIcon />
+                </IconButton>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  hidden
+                  onChange={handleAttachmentChange}
+                />
                 <TextField
                   fullWidth
                   placeholder="Type a message..."
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
-                  disabled={!activeChat || !canChat}
+                  disabled={!activeChat || !canChat || uploading}
                 />
-                <Button type="submit" variant="contained" disabled={!activeChat || !canChat}>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={!activeChat || !canChat || uploading}
+                >
                   Send
                 </Button>
               </Box>
+              {uploadError && (
+                <Typography variant="caption" color="error">
+                  {uploadError}
+                </Typography>
+              )}
             </Stack>
           </Paper>
         </Box>
@@ -872,26 +1452,65 @@ export default function MePage() {
             : undefined
         }
       >
-        <MenuItem
-          onClick={() => {
-            if (!contextMenu?.message) return;
-            setEditingId(contextMenu.message.id);
-            setEditingValue(contextMenu.message.body || "");
-            closeContextMenu();
-          }}
-        >
-          Edit message
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            if (!contextMenu?.message) return;
-            handleDeleteMessage(contextMenu.message.id);
-            closeContextMenu();
-          }}
-        >
-          Delete message
-        </MenuItem>
+        {menuCanEdit && (
+          <MenuItem
+            onClick={() => {
+              if (!menuMessage) return;
+              setEditingId(menuMessage.id);
+              setEditingValue(menuMessage.body || "");
+              closeContextMenu();
+            }}
+          >
+            Edit message
+          </MenuItem>
+        )}
+        {menuCanDownload && (
+          <MenuItem
+            onClick={() => {
+              if (!menuMessage) return;
+              handleDownloadAttachment(menuMessage);
+              closeContextMenu();
+            }}
+          >
+            Download attachment
+          </MenuItem>
+        )}
+        {menuCanDelete && (
+          <MenuItem
+            onClick={() => {
+              if (!menuMessage) return;
+              handleDeleteMessage(menuMessage.id);
+              closeContextMenu();
+            }}
+          >
+            Delete message
+          </MenuItem>
+        )}
       </Menu>
+      <Popover
+        open={Boolean(emojiAnchor)}
+        anchorEl={emojiAnchor}
+        onClose={closeEmojiPicker}
+        anchorOrigin={{ vertical: "top", horizontal: "left" }}
+        transformOrigin={{ vertical: "bottom", horizontal: "left" }}
+      >
+        <EmojiPicker
+          data={emojiData}
+          theme="dark"
+          onEmojiSelect={(emoji) => {
+            setMessageInput((prev) => `${prev}${emoji.native}`);
+          }}
+        />
+      </Popover>
+      {callSession && (
+        <CallModal
+          open={Boolean(callSession)}
+          callId={callSession.callId}
+          type={callSession.type}
+          role={callSession.role}
+          onClose={() => setCallSession(null)}
+        />
+      )}
     </>
   );
 }
