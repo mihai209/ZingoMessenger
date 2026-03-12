@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   const targetPath = Array.isArray(req.query.path)
     ? req.query.path.join("/")
     : req.query.path || "";
-  const url = new URL(`${base.replace(/\\/$/, "")}/${targetPath}`);
+  const url = new URL(`${base.replace(/\/$/, "")}/${targetPath}`);
   for (const [key, value] of Object.entries(req.query)) {
     if (key === "path") continue;
     if (Array.isArray(value)) {

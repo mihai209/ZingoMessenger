@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const url = new URL(`${base.replace(/\\/$/, "")}/events`);
+  const url = new URL(`${base.replace(/\/$/, "")}/events`);
   const headers = {
     accept: "text/event-stream",
     "x-api-token": token
