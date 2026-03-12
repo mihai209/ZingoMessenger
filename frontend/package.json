@@ -3,10 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev-with-tunnel.js",
     "build": "next build",
-    "start": "next start",
-    "start:standalone": "node scripts/start-with-tunnel.js"
+    "start": "node scripts/start-with-tunnel.js",
+    "start:standalone": "node scripts/start-standalone.js"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",

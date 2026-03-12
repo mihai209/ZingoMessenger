@@ -39,4 +39,5 @@ process.on("SIGTERM", () => {
   process.exit(0);
 });
 
-require(path.join(__dirname, "..", "src", "index.js"));
+const child = spawn("next", ["dev"], { stdio: "inherit", shell: true });
+child.on("exit", (code) => process.exit(code || 0));
