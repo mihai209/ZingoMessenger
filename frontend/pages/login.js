@@ -10,7 +10,7 @@ import {
   Typography
 } from "@mui/material";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
+const API_BASE = "/api";
 
 export default function LoginPage() {
   const apiBase = API_BASE;
@@ -36,7 +36,9 @@ export default function LoginPage() {
       console.log("POST", `${apiBase}/auth/login`, payload);
       const res = await fetch(`${apiBase}/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify(payload),
         credentials: "include"
       });

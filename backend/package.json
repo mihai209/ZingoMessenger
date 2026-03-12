@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "main": "src/index.js",
   "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "dev": "nodemon --watch src --exec node scripts/start.js",
+    "start": "node scripts/start.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

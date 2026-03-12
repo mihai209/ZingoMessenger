@@ -11,7 +11,7 @@ import {
   Typography
 } from "@mui/material";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
+const API_BASE = "/api";
 
 export default function ChatPage() {
   const router = useRouter();
@@ -35,7 +35,7 @@ export default function ChatPage() {
       const data = await res.json().catch(() => ({ items: [] }));
       if (isMounted) setMessages(data.items || []);
 
-      es = new EventSource(`${API_BASE}/events`, { withCredentials: true });
+      es = new EventSource(`/api/proxy/events`, { withCredentials: true });
       es.addEventListener("message", (event) => {
         try {
           const payload = JSON.parse(event.data);
@@ -76,7 +76,9 @@ export default function ChatPage() {
 
     const res = await fetch(`${API_BASE}/chats/${chatId}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({ body }),
       credentials: "include"
     });

@@ -233,14 +233,17 @@ export default function MePage() {
   const activeChatRef = useRef(null);
   const fileInputRef = useRef(null);
   const router = useRouter();
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
+  const apiHeaders = {};
 
   useEffect(() => {
     let isMounted = true;
     let es;
     async function loadMe() {
       try {
-        const res = await fetch(`${apiBase}/auth/me`, { credentials: "include" });
+        const res = await fetch(`/api/auth/me`, {
+          credentials: "include",
+          headers: apiHeaders
+        });
         if (res.status === 401) {
           router.replace("/login");
           return;
@@ -259,33 +262,43 @@ export default function MePage() {
           setStatus(data.status);
         }
 
-        const inboxRes = await fetch(`${apiBase}/friends/inbox`, { credentials: "include" });
+        const inboxRes = await fetch(`/api/friends/inbox`, {
+          credentials: "include",
+          headers: apiHeaders
+        });
         const inboxData = await inboxRes.json().catch(() => ({ items: [] }));
         if (isMounted && inboxData?.items) {
           setInbox(inboxData.items);
         }
 
-        const sentRes = await fetch(`${apiBase}/friends/sent`, { credentials: "include" });
+        const sentRes = await fetch(`/api/friends/sent`, {
+          credentials: "include",
+          headers: apiHeaders
+        });
         const sentData = await sentRes.json().catch(() => ({ items: [] }));
         if (isMounted && sentData?.items) {
           setSent(sentData.items);
         }
 
-        const friendsRes = await fetch(`${apiBase}/friends/list`, { credentials: "include" });
+        const friendsRes = await fetch(`/api/friends/list`, {
+          credentials: "include",
+          headers: apiHeaders
+        });
         const friendsData = await friendsRes.json().catch(() => ({ items: [] }));
         if (isMounted && friendsData?.items) {
           setFriends(friendsData.items);
         }
 
-        const callsRes = await fetch(`${apiBase}/calls/history`, {
-          credentials: "include"
+        const callsRes = await fetch(`/api/calls/history`, {
+          credentials: "include",
+          headers: apiHeaders
         });
         const callsData = await callsRes.json().catch(() => ({ items: [] }));
         if (isMounted && callsData?.items) {
           setCallHistory(callsData.items);
         }
 
-        es = new EventSource(`${apiBase}/events`, { withCredentials: true });
+        es = new EventSource(`/api/proxy/events`, { withCredentials: true });
         es.addEventListener("friend_request", (event) => {
           try {
             const payload = JSON.parse(event.data);
@@ -350,9 +363,10 @@ export default function MePage() {
                   deletedAt: null
                 }
               ]);
-              fetch(`${apiBase}/chats/${currentChat.chatId}/read`, {
+              fetch(`/api/chats/${currentChat.chatId}/read`, {
                 method: "POST",
-                credentials: "include"
+                credentials: "include",
+                headers: apiHeaders
               });
               return;
             }
@@ -441,8 +455,9 @@ export default function MePage() {
           setCallSession(null);
         });
         es.addEventListener("call_history", async () => {
-          const callsRes = await fetch(`${apiBase}/calls/history`, {
-            credentials: "include"
+          const callsRes = await fetch(`/api/calls/history`, {
+            credentials: "include",
+            headers: apiHeaders
           });
           const callsData = await callsRes.json().catch(() => ({ items: [] }));
           setCallHistory(callsData.items || []);
@@ -473,7 +488,7 @@ export default function MePage() {
     avatarUrl && avatarUrl.startsWith("http")
       ? avatarUrl
       : avatarUrl
-        ? `${apiBase}${avatarUrl}`
+        ? `/api${avatarUrl}`
         : "/assets/images/default.png";
 
   const statusColors = {
@@ -485,7 +500,7 @@ export default function MePage() {
 
   const resolveAttachmentUrl = (url) => {
     if (!url) return "";
-    return url.startsWith("http") ? url : `${apiBase}${url}`;
+    return url.startsWith("http") ? url : `/api${url}`;
   };
 
   const formatBytes = (value) => {
@@ -501,16 +516,20 @@ export default function MePage() {
   };
 
   async function handleLogout() {
-    await fetch(`${apiBase}/auth/logout`, { method: "POST", credentials: "include" });
+    await fetch(`/api/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: apiHeaders
+    });
     router.replace("/login");
   }
 
   async function handleStatusChange(e) {
     const next = e.target.value;
     setStatus(next);
-    await fetch(`${apiBase}/account/status`, {
+    await fetch(`/api/account/status`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...apiHeaders },
       body: JSON.stringify({ status: next }),
       credentials: "include"
     });
@@ -522,9 +541,9 @@ export default function MePage() {
     const formEl = e.currentTarget;
     const form = new FormData(formEl);
     const username = form.get("username");
-    const res = await fetch(`${apiBase}/friends/request`, {
+    const res = await fetch(`/api/friends/request`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...apiHeaders },
       body: JSON.stringify({ username }),
       credentials: "include"
     });
@@ -542,9 +561,9 @@ export default function MePage() {
   }
 
   async function handleInboxAction(id, action) {
-    await fetch(`${apiBase}/friends/respond`, {
+    await fetch(`/api/friends/respond`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...apiHeaders },
       body: JSON.stringify({ requestId: id, action }),
       credentials: "include"
     });
@@ -569,9 +588,9 @@ export default function MePage() {
   }
 
   async function handleCancel(id) {
-    await fetch(`${apiBase}/friends/cancel`, {
+    await fetch(`/api/friends/cancel`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...apiHeaders },
       body: JSON.stringify({ requestId: id }),
       credentials: "include"
     });
@@ -579,9 +598,9 @@ export default function MePage() {
   }
 
   async function handleRemoveFriend(id) {
-    await fetch(`${apiBase}/friends/remove`, {
+    await fetch(`/api/friends/remove`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...apiHeaders },
       body: JSON.stringify({ friendId: id }),
       credentials: "include"
     });
@@ -592,9 +611,9 @@ export default function MePage() {
   }
 
   async function openChat(friend) {
-    const res = await fetch(`${apiBase}/chats/ensure`, {
+    const res = await fetch(`/api/chats/ensure`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...apiHeaders },
       body: JSON.stringify({ username: friend.username }),
       credentials: "include"
     });
@@ -603,15 +622,17 @@ export default function MePage() {
 
     setActiveChat({ chatId: data.chatId, username: friend.username, userId: friend.id });
     activeChatRef.current = { chatId: data.chatId, username: friend.username, userId: friend.id };
-    const msgsRes = await fetch(`${apiBase}/chats/${data.chatId}/messages`, {
-      credentials: "include"
+    const msgsRes = await fetch(`/api/chats/${data.chatId}/messages`, {
+      credentials: "include",
+      headers: apiHeaders
     });
     const msgs = await msgsRes.json().catch(() => ({ items: [] }));
     setMessages(msgs.items || []);
     setCanChat(Boolean(msgs.canChat));
-    await fetch(`${apiBase}/chats/${data.chatId}/read`, {
+    await fetch(`/api/chats/${data.chatId}/read`, {
       method: "POST",
-      credentials: "include"
+      credentials: "include",
+      headers: apiHeaders
     });
     setFriends((prev) =>
       prev.map((f) => (f.id === friend.id ? { ...f, unreadCount: 0 } : f))
@@ -656,10 +677,11 @@ export default function MePage() {
     form.append("file", file);
     setUploading(true);
     try {
-      const res = await fetch(`${apiBase}/chats/${activeChat.chatId}/attachments`, {
+      const res = await fetch(`/api/chats/${activeChat.chatId}/attachments`, {
         method: "POST",
         body: form,
-        credentials: "include"
+        credentials: "include",
+        headers: apiHeaders
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -680,10 +702,10 @@ export default function MePage() {
     if (!activeChat || !editingId || !editingValue.trim()) return;
     const body = editingValue.trim();
     const res = await fetch(
-      `${apiBase}/chats/${activeChat.chatId}/messages/${editingId}`,
+      `/api/chats/${activeChat.chatId}/messages/${editingId}`,
       {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify({ body }),
         credentials: "include"
       }
@@ -705,9 +727,10 @@ export default function MePage() {
 
   async function handleDeleteMessage(messageId) {
     if (!activeChat) return;
-    await fetch(`${apiBase}/chats/${activeChat.chatId}/messages/${messageId}`, {
+    await fetch(`/api/chats/${activeChat.chatId}/messages/${messageId}`, {
       method: "DELETE",
-      credentials: "include"
+      credentials: "include",
+      headers: apiHeaders
     });
     setMessages((prev) =>
       prev.map((m) =>
@@ -719,7 +742,7 @@ export default function MePage() {
   function handleDownloadAttachment(message) {
     if (!message?.attachmentUrl) return;
     const url = resolveAttachmentUrl(message.attachmentUrl);
-    fetch(url, { credentials: "include" })
+    fetch(url, { credentials: "include", headers: apiHeaders })
       .then((res) => res.blob())
       .then((blob) => {
         const blobUrl = URL.createObjectURL(blob);
@@ -738,9 +761,9 @@ export default function MePage() {
   async function handleStartCall(type) {
     if (!activeChat) return;
     setCallInfo("");
-    const res = await fetch(`${apiBase}/calls/start`, {
+    const res = await fetch(`/api/calls/start`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...apiHeaders },
       body: JSON.stringify({ username: activeChat.username, type }),
       credentials: "include"
     });
@@ -759,9 +782,10 @@ export default function MePage() {
 
   async function acceptCall() {
     if (!incomingCall) return;
-    await fetch(`${apiBase}/calls/${incomingCall.callId}/accept`, {
+    await fetch(`/api/calls/${incomingCall.callId}/accept`, {
       method: "POST",
-      credentials: "include"
+      credentials: "include",
+      headers: apiHeaders
     });
     setCallSession({ callId: incomingCall.callId, type: incomingCall.type, role: "callee" });
     setIncomingCall(null);
@@ -770,9 +794,10 @@ export default function MePage() {
 
   async function declineCall() {
     if (!incomingCall) return;
-    await fetch(`${apiBase}/calls/${incomingCall.callId}/decline`, {
+    await fetch(`/api/calls/${incomingCall.callId}/decline`, {
       method: "POST",
-      credentials: "include"
+      credentials: "include",
+      headers: apiHeaders
     });
     setIncomingCall(null);
     setRinging(false);
@@ -784,9 +809,9 @@ export default function MePage() {
     const body = messageInput.trim();
     setMessageInput("");
 
-    const res = await fetch(`${apiBase}/chats/${activeChat.chatId}/messages`, {
+    const res = await fetch(`/api/chats/${activeChat.chatId}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...apiHeaders },
       body: JSON.stringify({ body }),
       credentials: "include"
     });
@@ -1046,7 +1071,7 @@ export default function MePage() {
                           req.from.avatarUrl
                             ? req.from.avatarUrl.startsWith("http")
                               ? req.from.avatarUrl
-                              : `${apiBase}${req.from.avatarUrl}`
+                              : `/api${req.from.avatarUrl}`
                             : "/assets/images/default.png"
                         }
                         sx={{ width: 32, height: 32 }}
@@ -1089,7 +1114,7 @@ export default function MePage() {
                           req.to.avatarUrl
                             ? req.to.avatarUrl.startsWith("http")
                               ? req.to.avatarUrl
-                              : `${apiBase}${req.to.avatarUrl}`
+                              : `/api${req.to.avatarUrl}`
                             : "/assets/images/default.png"
                         }
                         sx={{ width: 32, height: 32 }}
@@ -1127,7 +1152,7 @@ export default function MePage() {
                           call.other.avatarUrl
                             ? call.other.avatarUrl.startsWith("http")
                               ? call.other.avatarUrl
-                              : `${apiBase}${call.other.avatarUrl}`
+                              : `/api${call.other.avatarUrl}`
                             : "/assets/images/default.png"
                         }
                         sx={{ width: 32, height: 32 }}
@@ -1172,7 +1197,7 @@ export default function MePage() {
                         friend.avatarUrl
                           ? friend.avatarUrl.startsWith("http")
                             ? friend.avatarUrl
-                            : `${apiBase}${friend.avatarUrl}`
+                            : `/api${friend.avatarUrl}`
                           : "/assets/images/default.png"
                       }
                       sx={{ width: 32, height: 32 }}
@@ -1247,7 +1272,7 @@ export default function MePage() {
                           incomingCall.from?.avatarUrl
                             ? incomingCall.from.avatarUrl.startsWith("http")
                               ? incomingCall.from.avatarUrl
-                              : `${apiBase}${incomingCall.from.avatarUrl}`
+                              : `/api${incomingCall.from.avatarUrl}`
                             : "/assets/images/default.png"
                         }
                         sx={{ width: 36, height: 36 }}

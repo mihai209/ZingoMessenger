@@ -20,13 +20,24 @@ const corsOptions = {
     return cb(new Error("Not allowed by CORS"));
   },
   methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-Token"],
   credentials: true
 };
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
+
+const apiToken = process.env.API_TOKEN || "";
+app.use((req, res, next) => {
+  if (!apiToken) return next();
+  if (req.method === "OPTIONS") return next();
+  if (req.path.startsWith("/uploads") || req.path === "/health") return next();
+  const headerToken = req.get("x-api-token");
+  const queryToken = req.query?.token;
+  if (headerToken === apiToken || queryToken === apiToken) return next();
+  return res.status(401).json({ error: "invalid_token" });
+});
 
 const uploadsRoot = path.join(__dirname, "..", "uploads");
 const avatarsDir = path.join(uploadsRoot, "avatars");

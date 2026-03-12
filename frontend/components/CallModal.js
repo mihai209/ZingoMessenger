@@ -14,7 +14,8 @@ import VideocamRoundedIcon from "@mui/icons-material/VideocamRounded";
 import VideocamOffRoundedIcon from "@mui/icons-material/VideocamOffRounded";
 import CallEndRoundedIcon from "@mui/icons-material/CallEndRounded";
 
-const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
+const apiBase = "/api";
+const apiHeaders = {};
 
 export default function CallModal({ open, callId, type, role, onClose }) {
   const [me, setMe] = useState(null);
@@ -44,7 +45,10 @@ export default function CallModal({ open, callId, type, role, onClose }) {
 
     async function init() {
       try {
-        const meRes = await fetch(`${apiBase}/auth/me`, { credentials: "include" });
+        const meRes = await fetch(`${apiBase}/auth/me`, {
+          credentials: "include",
+          headers: apiHeaders
+        });
         if (meRes.status === 401) {
           setError("Not authenticated.");
           return;
@@ -53,7 +57,10 @@ export default function CallModal({ open, callId, type, role, onClose }) {
         if (!mounted) return;
         setMe(meData);
 
-        const callRes = await fetch(`${apiBase}/calls/${callId}`, { credentials: "include" });
+        const callRes = await fetch(`${apiBase}/calls/${callId}`, {
+          credentials: "include",
+          headers: apiHeaders
+        });
         if (!callRes.ok) {
           setError("Call not found.");
           return;
@@ -71,7 +78,7 @@ export default function CallModal({ open, callId, type, role, onClose }) {
           if (event.candidate) {
             fetch(`${apiBase}/calls/${callId}/ice`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...apiHeaders },
               body: JSON.stringify({ candidate: event.candidate }),
               credentials: "include"
             });
@@ -93,7 +100,7 @@ export default function CallModal({ open, callId, type, role, onClose }) {
           localVideoRef.current.srcObject = localStream;
         }
 
-        const es = new EventSource(`${apiBase}/events`, { withCredentials: true });
+        const es = new EventSource(`/api/proxy/events`, { withCredentials: true });
         esRef.current = es;
 
         if (roleRef.current === "caller") {
@@ -111,7 +118,7 @@ export default function CallModal({ open, callId, type, role, onClose }) {
           await pc.setLocalDescription(offer);
           await fetch(`${apiBase}/calls/${callId}/offer`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...apiHeaders },
             body: JSON.stringify({ sdp: offer }),
             credentials: "include"
           });
@@ -127,7 +134,7 @@ export default function CallModal({ open, callId, type, role, onClose }) {
           await pc.setLocalDescription(answer);
           await fetch(`${apiBase}/calls/${callId}/answer`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...apiHeaders },
             body: JSON.stringify({ sdp: answer }),
             credentials: "include"
           });
@@ -254,7 +261,8 @@ export default function CallModal({ open, callId, type, role, onClose }) {
     if (callId) {
       await fetch(`${apiBase}/calls/${callId}/leave`, {
         method: "POST",
-        credentials: "include"
+        credentials: "include",
+        headers: apiHeaders
       });
     }
     handleClose();
